@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<AssemblyName>SmartExcelKit</AssemblyName>
+		<PackageId>SmartExcelKit</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>Ramazan Erbasaran</Authors>
+		<Copyright>Copyright © 2026 Ramazan Erbasaran</Copyright>
+		<Description>A lightweight, ultra-fast, and memory-optimized .NET Standard 2.0 library to read, write, and stream spreadsheet files (XLSX, XLS, CSV, TSV, HTML, XML 2003, JSON). Features native XLS binary reading (BIFF8/OLE2), a zero-allocation streaming reader/writer, automatic file format signature detection, and an independent Excel formula calculation engine with cycle reference verification.</Description>
+		<PackageTags>excel xlsx xls csv tsv parsing export import streaming formula-engine spreadsheet dynamic-format openxml netstandard low-allocation biff8 ole2</PackageTags>
+    	<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/erbasaran/SmartExcelKit.NET</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/erbasaran/SmartExcelKit.NET</RepositoryUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
+		<None Include="..\..\icon.png" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Memory" />
+    <PackageReference Include="System.Text.Encoding.CodePages" />
+  </ItemGroup>
+</Project>

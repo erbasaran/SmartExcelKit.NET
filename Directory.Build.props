@@ -1,0 +1,26 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    
+    <!-- NuGet Metadata -->
+    <Version>1.0.0</Version>
+		<Authors>Ramazan Erbasaran</Authors>
+		<Copyright>Copyright © 2026 Ramazan Erbasaran</Copyright>
+		<Description>A lightweight, ultra-fast, and memory-optimized .NET Standard 2.0 library to read, write, and stream spreadsheet files (XLSX, XLS, CSV, TSV, HTML, XML 2003, JSON). Features native XLS binary reading (BIFF8/OLE2), a zero-allocation streaming reader/writer, automatic file format signature detection, and an independent Excel formula calculation engine with cycle reference verification.</Description>
+		<PackageTags>excel xlsx xls csv tsv parsing export import streaming formula-engine spreadsheet dynamic-format openxml netstandard low-allocation biff8 ole2</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/erbasaran/SmartExcelKit.NET</RepositoryUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Condition="Exists('$(MSBuildThisFileDirectory)README.md') And !Exists('README.md')" />
+  </ItemGroup>
+</Project>

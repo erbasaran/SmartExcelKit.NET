@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/SmartExcelKit.Sample/SmartExcelKit.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/SmartExcelKit/SmartExcelKit.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SmartExcelKit.Benchmarks/SmartExcelKit.Benchmarks.csproj" />
+    <Project Path="tests/SmartExcelKit.Tests/SmartExcelKit.Tests.csproj" />
+  </Folder>
+</Solution>
