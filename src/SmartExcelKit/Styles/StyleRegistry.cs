@@ -23,35 +23,41 @@ public sealed class StyleRegistry
     }
 
     /// <summary>
-    /// Registers a style or returns its existing index.
+    /// Registers a style or returns its existing index. Thread-safe.
     /// </summary>
     /// <param name="style">The style structure to register.</param>
     /// <returns>A unique 0-based index identifier for the style.</returns>
     public uint Register(ExcelStyle style)
     {
-        if (_styleToId.TryGetValue(style, out uint existingId))
+        lock (_styles)
         {
-            return existingId;
-        }
+            if (_styleToId.TryGetValue(style, out uint existingId))
+            {
+                return existingId;
+            }
 
-        uint newId = (uint)_styles.Count;
-        _styles.Add(style);
-        _styleToId.Add(style, newId);
-        return newId;
+            uint newId = (uint)_styles.Count;
+            _styles.Add(style);
+            _styleToId.Add(style, newId);
+            return newId;
+        }
     }
 
     /// <summary>
-    /// Retrieves style details using its index.
+    /// Retrieves style details using its index. Thread-safe.
     /// </summary>
     /// <param name="index">The 0-based style index.</param>
     /// <returns>The registered <see cref="ExcelStyle"/>.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if the index is out of bounds.</exception>
     public ExcelStyle GetStyle(uint index)
     {
-        if (index >= _styles.Count)
+        lock (_styles)
         {
-            throw new ArgumentOutOfRangeException(nameof(index), $"Style ID {index} is not registered.");
+            if (index >= _styles.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(index), $"Style ID {index} is not registered.");
+            }
+            return _styles[(int)index];
         }
-        return _styles[(int)index];
     }
 }

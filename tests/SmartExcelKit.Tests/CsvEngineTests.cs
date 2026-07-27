@@ -1,12 +1,17 @@
+using System.IO;
+using System.Text;
 using FluentAssertions;
 using SmartExcelKit.Csv;
-using System.Text;
 using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for CsvEngine parsing, quoted fields, escaped quotes, and delimiter detection.
+/// </summary>
 public class CsvEngineTests
 {
+    /// <summary>Tests parsing simple CSV datasets.</summary>
     [Fact]
     public void CsvEngine_ShouldParseSimpleCsv()
     {
@@ -24,6 +29,7 @@ public class CsvEngineTests
         rows[2][2].Should().Be("London");
     }
 
+    /// <summary>Tests parsing quoted fields containing newlines.</summary>
     [Fact]
     public void CsvEngine_ShouldParseQuotedFieldsWithNewlines()
     {
@@ -40,6 +46,7 @@ public class CsvEngineTests
         rows[2][1].Should().Be("Normal message");
     }
 
+    /// <summary>Tests parsing escaped quotes inside quoted fields.</summary>
     [Fact]
     public void CsvEngine_ShouldParseEscapedQuotes()
     {
@@ -55,6 +62,7 @@ public class CsvEngineTests
         rows[1][1].Should().Be("Alice \"The Queen\"");
     }
 
+    /// <summary>Tests auto-detecting CSV delimiters (semicolon, comma, tab).</summary>
     [Fact]
     public void CsvEngine_ShouldDetectDelimiter()
     {

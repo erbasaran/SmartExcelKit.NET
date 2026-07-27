@@ -1,10 +1,15 @@
+using System.IO;
 using FluentAssertions;
 using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for format providers (XLSX, JSON, XML2003, HTML).
+/// </summary>
 public class FormatProviderTests
 {
+    /// <summary>Tests XLSX round-trip save and load.</summary>
     [Fact]
     public void XlsxProvider_ShouldWriteAndReadBackSymmetrically()
     {
@@ -33,6 +38,7 @@ public class FormatProviderTests
         loadedSheet.Cell("C1").Formula.Should().Be("B1*2");
     }
 
+    /// <summary>Tests JSON round-trip save and load.</summary>
     [Fact]
     public void JsonProvider_ShouldWriteAndReadBackSymmetrically()
     {
@@ -59,6 +65,7 @@ public class FormatProviderTests
         loadedSheet.Cell("C1").Value.Should().Be(true);
     }
 
+    /// <summary>Tests XML 2003 round-trip save and load.</summary>
     [Fact]
     public void Xml2003Provider_ShouldWriteAndReadBackSymmetrically()
     {
@@ -82,6 +89,7 @@ public class FormatProviderTests
         loadedSheet.Cell("B1").Value.Should().Be(456.78);
     }
 
+    /// <summary>Tests HTML Table round-trip save and load.</summary>
     [Fact]
     public void HtmlTableProvider_ShouldWriteAndReadBackSymmetrically()
     {

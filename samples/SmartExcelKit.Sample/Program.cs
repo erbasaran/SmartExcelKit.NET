@@ -1,10 +1,19 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
 using SmartExcelKit.Formula;
 using SmartExcelKit.Styles;
 
 namespace SmartExcelKit.Sample;
 
+/// <summary>
+/// Sample application demonstrating SmartExcelKit features.
+/// </summary>
 public static class Program
 {
+    /// <summary>
+    /// Entry point of the sample application.
+    /// </summary>
     public static void Main()
     {
         Console.WriteLine("==================================================");
@@ -122,9 +131,17 @@ public static class Program
     }
 }
 
+/// <summary>
+/// Sample POCO item representation.
+/// </summary>
 public sealed class ProductItem
 {
+    /// <summary>Gets or sets the product name.</summary>
     public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the stock count.</summary>
     public int Stock { get; set; }
+
+    /// <summary>Gets or sets the unit price.</summary>
     public double Price { get; set; }
 }

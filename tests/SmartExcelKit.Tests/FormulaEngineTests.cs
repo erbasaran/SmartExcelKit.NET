@@ -6,8 +6,12 @@ using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for formula tokenizer, parser, evaluator, and dependency graph.
+/// </summary>
 public class FormulaEngineTests
 {
+    /// <summary>Tests formula tokenizing logic.</summary>
     [Fact]
     public void Tokenizer_ShouldParseTokens()
     {
@@ -31,6 +35,7 @@ public class FormulaEngineTests
         tokens[5].Value.Should().Be("12.34");
     }
 
+    /// <summary>Tests formula AST parsing logic.</summary>
     [Fact]
     public void Parser_ShouldCreateCorrectAST()
     {
@@ -51,6 +56,7 @@ public class FormulaEngineTests
         rightOp.Operator.Should().Be("*");
     }
 
+    /// <summary>Tests formula evaluation arithmetic.</summary>
     [Fact]
     public void Evaluator_ShouldEvaluateBasicArithmetic()
     {
@@ -65,6 +71,7 @@ public class FormulaEngineTests
         result.Should().Be(20.0);
     }
 
+    /// <summary>Tests formula function evaluation (SUM, AVERAGE, MIN).</summary>
     [Fact]
     public void Evaluator_ShouldEvaluateFunctions()
     {
@@ -86,6 +93,7 @@ public class FormulaEngineTests
         minResult.Should().Be(10.0);
     }
 
+    /// <summary>Tests formula evaluation for IF logical function.</summary>
     [Fact]
     public void Evaluator_ShouldEvaluateLogicalIf()
     {
@@ -99,6 +107,7 @@ public class FormulaEngineTests
         FormulaEvaluator.Evaluate("=IF(A1 < 2, \"Yes\", \"No\")", sheet, new CellAddress(2, 1)).Should().Be("No");
     }
 
+    /// <summary>Tests dependency graph cycle detection.</summary>
     [Fact]
     public void DependencyGraph_ShouldDetectCycleAndThrow()
     {

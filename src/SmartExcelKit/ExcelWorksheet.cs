@@ -1,12 +1,16 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Reflection;
 using SmartExcelKit.Core;
 using SmartExcelKit.Styles;
-using System.Data;
-using System.Reflection;
 
 namespace SmartExcelKit;
 
 /// <summary>
-/// Represents an Excel worksheet containing cells, rows, columns, styles, and settings.
+/// Represents an Excel worksheet containing cells, rows, columns, styles, and layout settings.
 /// </summary>
 public sealed class ExcelWorksheet
 {
@@ -18,6 +22,17 @@ public sealed class ExcelWorksheet
     private readonly HashSet<int> _hiddenRows = [];
     private readonly HashSet<int> _hiddenColumns = [];
     private readonly List<ExcelRangeAddress> _mergedRanges = [];
+
+    // Cell counts per row and column for O(1) empty checks
+    private readonly Dictionary<int, int> _rowCellCounts = [];
+    private readonly Dictionary<int, int> _colCellCounts = [];
+
+    // Cached bounds
+    private int _minRow = int.MaxValue;
+    private int _maxRow = 0;
+    private int _minCol = int.MaxValue;
+    private int _maxCol = 0;
+    private bool _boundsDirty = false;
 
     /// <summary>
     /// Gets the workbook associated with this worksheet.
@@ -81,6 +96,22 @@ public sealed class ExcelWorksheet
     public bool IsProtected => ProtectionPasswordHash != null;
 
     /// <summary>
+    /// Gets the dictionary of raw cell data (internal use).
+    /// </summary>
+    internal IReadOnlyDictionary<CellAddress, CellData> RawCells => _cells;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ExcelWorksheet"/> class.
+    /// </summary>
+    internal ExcelWorksheet(ExcelWorkbook workbook, string name)
+    {
+        _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
+        _name = name;
+    }
+
+    #region Security & Protection
+
+    /// <summary>
     /// Protects the worksheet with a password using the Excel XOR hashing algorithm.
     /// </summary>
     /// <param name="password">The password to protect the sheet with.</param>
@@ -114,22 +145,25 @@ public sealed class ExcelWorksheet
         ProtectionPasswordHash = null;
     }
 
-    /// <summary>
-    /// Gets the dictionary of raw cell data (internal use).
-    /// </summary>
-    internal IReadOnlyDictionary<CellAddress, CellData> RawCells => _cells;
+    #endregion
+
+    #region Navigation, Accessors & Indexers
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ExcelWorksheet"/> class.
+    /// Gets an <see cref="ExcelCell"/> by row and column index (1-based).
     /// </summary>
-    internal ExcelWorksheet(ExcelWorkbook workbook, string name)
-    {
-        _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
-        _name = name;
-    }
+    /// <param name="row">The 1-based row index.</param>
+    /// <param name="column">The 1-based column index.</param>
+    public ExcelCell this[int row, int column] => Cell(row, column);
 
     /// <summary>
-    /// Retrieves a cell by its address.
+    /// Gets an <see cref="ExcelRange"/> by range or cell address string (e.g. "A1" or "A1:C10").
+    /// </summary>
+    /// <param name="rangeOrAddress">The address or range reference string.</param>
+    public ExcelRange this[string rangeOrAddress] => Range(rangeOrAddress);
+
+    /// <summary>
+    /// Retrieves a cell by its address coordinates.
     /// </summary>
     public ExcelCell Cell(CellAddress address) => new(this, address);
 
@@ -144,27 +178,302 @@ public sealed class ExcelWorksheet
     public ExcelCell Cell(string address) => Cell(CellAddress.Parse(address));
 
     /// <summary>
+    /// Retrieves a row by its 1-based row index.
+    /// </summary>
+    /// <param name="index">The 1-based row index.</param>
+    /// <returns>An <see cref="ExcelRow"/> instance.</returns>
+    public ExcelRow Row(int index) => new(this, index);
+
+    /// <summary>
+    /// Retrieves a column by its 1-based column index.
+    /// </summary>
+    /// <param name="index">The 1-based column index.</param>
+    /// <returns>An <see cref="ExcelColumn"/> instance.</returns>
+    public ExcelColumn Column(int index) => new(this, index);
+
+    /// <summary>
     /// Retrieves a range by start and end coordinates.
     /// </summary>
     public ExcelRange Range(int startRow, int startColumn, int endRow, int endColumn) =>
         new(this, new ExcelRangeAddress(startRow, startColumn, endRow, endColumn));
 
     /// <summary>
-    /// Retrieves a range by address string (e.g., "A1:B3").
+    /// Retrieves a range by address string (e.g., "A1:B3" or "A1").
     /// </summary>
     public ExcelRange Range(string rangeAddress) => new(this, ExcelRangeAddress.Parse(rangeAddress));
+
+    #endregion
+
+    #region Bounds & Lazy Enumerations
 
     /// <summary>
     /// Gets the maximum row index currently populated.
     /// </summary>
-    public int MaxRow => _cells.Count == 0 ? 0 : _cells.Keys.Max(c => c.Row);
+    public int MaxRow
+    {
+        get
+        {
+            EnsureBoundsValid();
+            return _maxRow;
+        }
+    }
 
     /// <summary>
     /// Gets the maximum column index currently populated.
     /// </summary>
-    public int MaxColumn => _cells.Count == 0 ? 0 : _cells.Keys.Max(c => c.Column);
+    public int MaxColumn
+    {
+        get
+        {
+            EnsureBoundsValid();
+            return _maxCol;
+        }
+    }
 
-    #region Internal Cell Data Operations
+    /// <summary>
+    /// Gets the total populated row count (alias for <see cref="MaxRow"/>).
+    /// </summary>
+    public int RowCount => MaxRow;
+
+    /// <summary>
+    /// Gets the total populated column count (alias for <see cref="MaxColumn"/>).
+    /// </summary>
+    public int ColumnCount => MaxColumn;
+
+    /// <summary>
+    /// Gets the number of rows spanned by the used range (0 if empty).
+    /// </summary>
+    public int UsedRowCount => HasUsedCells ? (MaxRow - MinRow + 1) : 0;
+
+    /// <summary>
+    /// Gets the number of columns spanned by the used range (0 if empty).
+    /// </summary>
+    public int UsedColumnCount => HasUsedCells ? (MaxColumn - MinColumn + 1) : 0;
+
+    internal int MinRow
+    {
+        get
+        {
+            EnsureBoundsValid();
+            return _minRow == int.MaxValue ? 1 : _minRow;
+        }
+    }
+
+    internal int MinColumn
+    {
+        get
+        {
+            EnsureBoundsValid();
+            return _minCol == int.MaxValue ? 1 : _minCol;
+        }
+    }
+
+    private bool HasUsedCells
+    {
+        get
+        {
+            EnsureBoundsValid();
+            return _maxRow > 0 && _maxCol > 0;
+        }
+    }
+
+    /// <summary>
+    /// Gets an <see cref="ExcelRange"/> covering all populated cells in the worksheet.
+    /// Returns range A1:A1 if sheet is empty.
+    /// </summary>
+    public ExcelRange UsedRange
+    {
+        get
+        {
+            EnsureBoundsValid();
+            if (!HasUsedCells)
+            {
+                return Range(1, 1, 1, 1);
+            }
+            return Range(MinRow, MinColumn, MaxRow, MaxColumn);
+        }
+    }
+
+    /// <summary>
+    /// Returns a lazy enumeration of all rows up to <see cref="MaxRow"/>.
+    /// </summary>
+    public IEnumerable<ExcelRow> Rows
+    {
+        get
+        {
+            int max = Math.Max(1, MaxRow);
+            for (int r = 1; r <= max; r++)
+            {
+                yield return Row(r);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a lazy enumeration of all columns up to <see cref="MaxColumn"/>.
+    /// </summary>
+    public IEnumerable<ExcelColumn> Columns
+    {
+        get
+        {
+            int max = Math.Max(1, MaxColumn);
+            for (int c = 1; c <= max; c++)
+            {
+                yield return Column(c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a lazy enumeration of all used (non-empty) cells in the worksheet.
+    /// </summary>
+    public IEnumerable<ExcelCell> CellsUsed()
+    {
+        foreach (var kvp in _cells)
+        {
+            if (kvp.Value != null && !kvp.Value.IsEmpty)
+            {
+                yield return Cell(kvp.Key);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a lazy enumeration of all rows containing used cells or custom row settings.
+    /// </summary>
+    public IEnumerable<ExcelRow> RowsUsed()
+    {
+        EnsureBoundsValid();
+        if (!HasUsedCells && _rowHeights.Count == 0 && _hiddenRows.Count == 0) yield break;
+
+        int min = Math.Min(MinRow, _rowHeights.Keys.Concat(_hiddenRows).DefaultIfEmpty(int.MaxValue).Min());
+        int max = Math.Max(MaxRow, _rowHeights.Keys.Concat(_hiddenRows).DefaultIfEmpty(0).Max());
+
+        if (min > max || max == 0) yield break;
+
+        for (int r = min; r <= max; r++)
+        {
+            if ((_rowCellCounts.TryGetValue(r, out int cnt) && cnt > 0) || _rowHeights.ContainsKey(r) || _hiddenRows.Contains(r))
+            {
+                yield return Row(r);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a lazy enumeration of all columns containing used cells or custom column settings.
+    /// </summary>
+    public IEnumerable<ExcelColumn> ColumnsUsed()
+    {
+        EnsureBoundsValid();
+        if (!HasUsedCells && _columnWidths.Count == 0 && _hiddenColumns.Count == 0) yield break;
+
+        int min = Math.Min(MinColumn, _columnWidths.Keys.Concat(_hiddenColumns).DefaultIfEmpty(int.MaxValue).Min());
+        int max = Math.Max(MaxColumn, _columnWidths.Keys.Concat(_hiddenColumns).DefaultIfEmpty(0).Max());
+
+        if (min > max || max == 0) yield break;
+
+        for (int c = min; c <= max; c++)
+        {
+            if ((_colCellCounts.TryGetValue(c, out int cnt) && cnt > 0) || _columnWidths.ContainsKey(c) || _hiddenColumns.Contains(c))
+            {
+                yield return Column(c);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the first used row in the worksheet, or null if empty.
+    /// </summary>
+    public ExcelRow? FirstRowUsed()
+    {
+        EnsureBoundsValid();
+        return HasUsedCells ? Row(MinRow) : null;
+    }
+
+    /// <summary>
+    /// Gets the last used row in the worksheet, or null if empty.
+    /// </summary>
+    public ExcelRow? LastRowUsed()
+    {
+        EnsureBoundsValid();
+        return HasUsedCells ? Row(MaxRow) : null;
+    }
+
+    /// <summary>
+    /// Gets the first used column in the worksheet, or null if empty.
+    /// </summary>
+    public ExcelColumn? FirstColumnUsed()
+    {
+        EnsureBoundsValid();
+        return HasUsedCells ? Column(MinColumn) : null;
+    }
+
+    /// <summary>
+    /// Gets the last used column in the worksheet, or null if empty.
+    /// </summary>
+    public ExcelColumn? LastColumnUsed()
+    {
+        EnsureBoundsValid();
+        return HasUsedCells ? Column(MaxColumn) : null;
+    }
+
+    private void TrackCellAdded(CellAddress address)
+    {
+        if (address.Row < _minRow) _minRow = address.Row;
+        if (address.Row > _maxRow) _maxRow = address.Row;
+        if (address.Column < _minCol) _minCol = address.Column;
+        if (address.Column > _maxCol) _maxCol = address.Column;
+
+        _rowCellCounts[address.Row] = _rowCellCounts.TryGetValue(address.Row, out int rCnt) ? rCnt + 1 : 1;
+        _colCellCounts[address.Column] = _colCellCounts.TryGetValue(address.Column, out int cCnt) ? cCnt + 1 : 1;
+    }
+
+    private void TrackCellRemoved(CellAddress address)
+    {
+        if (_rowCellCounts.TryGetValue(address.Row, out int rCnt))
+        {
+            if (rCnt <= 1) _rowCellCounts.Remove(address.Row);
+            else _rowCellCounts[address.Row] = rCnt - 1;
+        }
+
+        if (_colCellCounts.TryGetValue(address.Column, out int cCnt))
+        {
+            if (cCnt <= 1) _colCellCounts.Remove(address.Column);
+            else _colCellCounts[address.Column] = cCnt - 1;
+        }
+
+        _boundsDirty = true;
+    }
+
+    private void EnsureBoundsValid()
+    {
+        if (!_boundsDirty) return;
+
+        _minRow = int.MaxValue;
+        _maxRow = 0;
+        _minCol = int.MaxValue;
+        _maxCol = 0;
+
+        foreach (var kvp in _cells)
+        {
+            if (kvp.Value != null && !kvp.Value.IsEmpty)
+            {
+                int r = kvp.Key.Row;
+                int c = kvp.Key.Column;
+                if (r < _minRow) _minRow = r;
+                if (r > _maxRow) _maxRow = r;
+                if (c < _minCol) _minCol = c;
+                if (c > _maxCol) _maxCol = c;
+            }
+        }
+
+        _boundsDirty = false;
+    }
+
+    #endregion
+
+    #region Internal Cell Operations
 
     private CellData GetOrCreateCellData(CellAddress address)
     {
@@ -172,6 +481,7 @@ public sealed class ExcelWorksheet
         {
             data = new CellData();
             _cells[address] = data;
+            TrackCellAdded(address);
         }
         return data;
     }
@@ -188,7 +498,12 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Value = null;
-                data.Formula = null; // Clear formula if value is null'd
+                data.Formula = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
             }
             return;
         }
@@ -207,6 +522,11 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Formula = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
             }
             return;
         }
@@ -240,6 +560,11 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Comment = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
             }
             return;
         }
@@ -258,6 +583,11 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Hyperlink = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
             }
             return;
         }
@@ -288,7 +618,7 @@ public sealed class ExcelWorksheet
     public double GetColumnWidth(int column)
     {
         if (column < 1) throw new ArgumentOutOfRangeException(nameof(column));
-        return _columnWidths.TryGetValue(column, out double w) ? w : 8.43; // Standard Excel column width
+        return _columnWidths.TryGetValue(column, out double w) ? w : 8.43;
     }
 
     /// <summary>
@@ -311,7 +641,7 @@ public sealed class ExcelWorksheet
     public double GetRowHeight(int row)
     {
         if (row < 1) throw new ArgumentOutOfRangeException(nameof(row));
-        return _rowHeights.TryGetValue(row, out double h) ? h : 15.0; // Standard Excel row height
+        return _rowHeights.TryGetValue(row, out double h) ? h : 15.0;
     }
 
     /// <summary>
@@ -388,8 +718,255 @@ public sealed class ExcelWorksheet
                 if (len > maxLen) maxLen = len;
             }
         }
-        double width = Math.Max(8.43, (maxLen + 2) * 1.1); // Dynamic measurement approximation
+        double width = Math.Max(8.43, (maxLen + 2) * 1.1);
         SetColumnWidth(column, width);
+    }
+
+    #endregion
+
+    #region Bulk & Matrix Operations
+
+    /// <summary>
+    /// Bulk sets cell values starting at the specified row and column.
+    /// </summary>
+    /// <param name="values">The 2D matrix of values.</param>
+    /// <param name="startRow">The 1-based starting row index (default 1).</param>
+    /// <param name="startColumn">The 1-based starting column index (default 1).</param>
+    public void SetValues(object?[,] values, int startRow = 1, int startColumn = 1)
+    {
+        if (values == null) throw new ArgumentNullException(nameof(values));
+        if (startRow < 1 || startColumn < 1) throw new ArgumentOutOfRangeException("Start coordinates must be >= 1.");
+
+        int rows = values.GetLength(0);
+        int cols = values.GetLength(1);
+
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < cols; c++)
+            {
+                int targetRow = startRow + r;
+                int targetCol = startColumn + c;
+                if (targetRow > 1048576 || targetCol > 16384) continue;
+                SetCellValue(new CellAddress(targetRow, targetCol), values[r, c]);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Retrieves a 2D matrix of cell values for the specified bounding region.
+    /// </summary>
+    /// <param name="startRow">The 1-based start row.</param>
+    /// <param name="startColumn">The 1-based start column.</param>
+    /// <param name="endRow">The 1-based end row.</param>
+    /// <param name="endColumn">The 1-based end column.</param>
+    /// <returns>A 2D matrix of cell values.</returns>
+    public object?[,] GetValues(int startRow, int startColumn, int endRow, int endColumn)
+    {
+        var range = Range(startRow, startColumn, endRow, endColumn);
+        return range.GetValues();
+    }
+
+    /// <summary>
+    /// Inserts blank rows at the specified index, shifting existing rows down and updating merged ranges.
+    /// </summary>
+    /// <param name="startRow">The 1-based starting row index to insert at.</param>
+    /// <param name="count">The number of rows to insert (default 1).</param>
+    public void InsertRows(int startRow, int count = 1)
+    {
+        if (startRow < 1) throw new ArgumentOutOfRangeException(nameof(startRow));
+        if (count < 1) return;
+
+        var entriesToShift = _cells.Where(kvp => kvp.Key.Row >= startRow).ToList();
+        foreach (var entry in entriesToShift)
+        {
+            _cells.Remove(entry.Key);
+        }
+        foreach (var entry in entriesToShift)
+        {
+            var newAddr = new CellAddress(entry.Key.Row + count, entry.Key.Column);
+            _cells[newAddr] = entry.Value;
+        }
+
+        var heightsToShift = _rowHeights.Where(kvp => kvp.Key >= startRow).ToList();
+        foreach (var kvp in heightsToShift)
+        {
+            _rowHeights.Remove(kvp.Key);
+        }
+        foreach (var kvp in heightsToShift)
+        {
+            _rowHeights[kvp.Key + count] = kvp.Value;
+        }
+
+        var hRows = _hiddenRows.Where(r => r >= startRow).ToList();
+        foreach (int r in hRows) _hiddenRows.Remove(r);
+        foreach (int r in hRows) _hiddenRows.Add(r + count);
+
+        // Shift merged ranges
+        for (int i = 0; i < _mergedRanges.Count; i++)
+        {
+            var m = _mergedRanges[i];
+            if (m.StartRow >= startRow)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow + count, m.StartColumn, m.EndRow + count, m.EndColumn);
+            }
+            else if (m.EndRow >= startRow)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow, m.StartColumn, m.EndRow + count, m.EndColumn);
+            }
+        }
+
+        _boundsDirty = true;
+    }
+
+    /// <summary>
+    /// Deletes rows at the specified index, shifting remaining lower rows up and updating merged ranges.
+    /// </summary>
+    /// <param name="startRow">The 1-based starting row index to delete.</param>
+    /// <param name="count">The number of rows to delete (default 1).</param>
+    public void DeleteRows(int startRow, int count = 1)
+    {
+        if (startRow < 1) throw new ArgumentOutOfRangeException(nameof(startRow));
+        if (count < 1) return;
+
+        int deleteEnd = startRow + count - 1;
+
+        var toRemove = _cells.Where(kvp => kvp.Key.Row >= startRow && kvp.Key.Row <= deleteEnd).Select(kvp => kvp.Key).ToList();
+        foreach (var key in toRemove) _cells.Remove(key);
+
+        var entriesToShift = _cells.Where(kvp => kvp.Key.Row > deleteEnd).ToList();
+        foreach (var entry in entriesToShift) _cells.Remove(entry.Key);
+        foreach (var entry in entriesToShift)
+        {
+            var newAddr = new CellAddress(entry.Key.Row - count, entry.Key.Column);
+            _cells[newAddr] = entry.Value;
+        }
+
+        for (int r = startRow; r <= deleteEnd; r++)
+        {
+            _rowHeights.Remove(r);
+            _hiddenRows.Remove(r);
+        }
+
+        var heightsToShift = _rowHeights.Where(kvp => kvp.Key > deleteEnd).ToList();
+        foreach (var kvp in heightsToShift) _rowHeights.Remove(kvp.Key);
+        foreach (var kvp in heightsToShift) _rowHeights[kvp.Key - count] = kvp.Value;
+
+        var hRows = _hiddenRows.Where(r => r > deleteEnd).ToList();
+        foreach (int r in hRows) _hiddenRows.Remove(r);
+        foreach (int r in hRows) _hiddenRows.Add(r - count);
+
+        // Shift merged ranges
+        for (int i = _mergedRanges.Count - 1; i >= 0; i--)
+        {
+            var m = _mergedRanges[i];
+            if (m.StartRow >= startRow && m.EndRow <= deleteEnd)
+            {
+                _mergedRanges.RemoveAt(i);
+            }
+            else if (m.StartRow > deleteEnd)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow - count, m.StartColumn, m.EndRow - count, m.EndColumn);
+            }
+        }
+
+        _boundsDirty = true;
+    }
+
+    /// <summary>
+    /// Inserts blank columns at the specified index, shifting existing columns right and updating merged ranges.
+    /// </summary>
+    /// <param name="startColumn">The 1-based starting column index to insert at.</param>
+    /// <param name="count">The number of columns to insert (default 1).</param>
+    public void InsertColumns(int startColumn, int count = 1)
+    {
+        if (startColumn < 1) throw new ArgumentOutOfRangeException(nameof(startColumn));
+        if (count < 1) return;
+
+        var entriesToShift = _cells.Where(kvp => kvp.Key.Column >= startColumn).ToList();
+        foreach (var entry in entriesToShift) _cells.Remove(entry.Key);
+        foreach (var entry in entriesToShift)
+        {
+            var newAddr = new CellAddress(entry.Key.Row, entry.Key.Column + count);
+            _cells[newAddr] = entry.Value;
+        }
+
+        var widthsToShift = _columnWidths.Where(kvp => kvp.Key >= startColumn).ToList();
+        foreach (var kvp in widthsToShift) _columnWidths.Remove(kvp.Key);
+        foreach (var kvp in widthsToShift) _columnWidths[kvp.Key + count] = kvp.Value;
+
+        var hCols = _hiddenColumns.Where(c => c >= startColumn).ToList();
+        foreach (int c in hCols) _hiddenColumns.Remove(c);
+        foreach (int c in hCols) _hiddenColumns.Add(c + count);
+
+        // Shift merged ranges
+        for (int i = 0; i < _mergedRanges.Count; i++)
+        {
+            var m = _mergedRanges[i];
+            if (m.StartColumn >= startColumn)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow, m.StartColumn + count, m.EndRow, m.EndColumn + count);
+            }
+            else if (m.EndColumn >= startColumn)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow, m.StartColumn, m.EndRow, m.EndColumn + count);
+            }
+        }
+
+        _boundsDirty = true;
+    }
+
+    /// <summary>
+    /// Deletes columns at the specified index, shifting remaining rightward columns left and updating merged ranges.
+    /// </summary>
+    /// <param name="startColumn">The 1-based starting column index to delete.</param>
+    /// <param name="count">The number of columns to delete (default 1).</param>
+    public void DeleteColumns(int startColumn, int count = 1)
+    {
+        if (startColumn < 1) throw new ArgumentOutOfRangeException(nameof(startColumn));
+        if (count < 1) return;
+
+        int deleteEnd = startColumn + count - 1;
+
+        var toRemove = _cells.Where(kvp => kvp.Key.Column >= startColumn && kvp.Key.Column <= deleteEnd).Select(kvp => kvp.Key).ToList();
+        foreach (var key in toRemove) _cells.Remove(key);
+
+        var entriesToShift = _cells.Where(kvp => kvp.Key.Column > deleteEnd).ToList();
+        foreach (var entry in entriesToShift) _cells.Remove(entry.Key);
+        foreach (var entry in entriesToShift)
+        {
+            var newAddr = new CellAddress(entry.Key.Row, entry.Key.Column - count);
+            _cells[newAddr] = entry.Value;
+        }
+
+        for (int c = startColumn; c <= deleteEnd; c++)
+        {
+            _columnWidths.Remove(c);
+            _hiddenColumns.Remove(c);
+        }
+
+        var widthsToShift = _columnWidths.Where(kvp => kvp.Key > deleteEnd).ToList();
+        foreach (var kvp in widthsToShift) _columnWidths.Remove(kvp.Key);
+        foreach (var kvp in widthsToShift) _columnWidths[kvp.Key - count] = kvp.Value;
+
+        var hCols = _hiddenColumns.Where(c => c > deleteEnd).ToList();
+        foreach (int c in hCols) _hiddenColumns.Remove(c);
+        foreach (int c in hCols) _hiddenColumns.Add(c - count);
+
+        // Shift merged ranges
+        for (int i = _mergedRanges.Count - 1; i >= 0; i--)
+        {
+            var m = _mergedRanges[i];
+            if (m.StartColumn >= startColumn && m.EndColumn <= deleteEnd)
+            {
+                _mergedRanges.RemoveAt(i);
+            }
+            else if (m.StartColumn > deleteEnd)
+            {
+                _mergedRanges[i] = new ExcelRangeAddress(m.StartRow, m.StartColumn - count, m.EndRow, m.EndColumn - count);
+            }
+        }
+
+        _boundsDirty = true;
     }
 
     #endregion
@@ -399,14 +976,12 @@ public sealed class ExcelWorksheet
     /// <summary>
     /// Imports a strongly typed collection of objects into the worksheet starting at the specified row and column.
     /// </summary>
-    public void Import<T>(IEnumerable<T> collection, int startRow = 1, int startColumn = 1)
+    public void Import<T>(IEnumerable<T> collection, int startRow = 1, int startColumn = 1) where T : class
     {
         if (collection == null) throw new ArgumentNullException(nameof(collection));
         if (startRow < 1 || startColumn < 1) throw new ArgumentOutOfRangeException("Start coordinates must be >= 1.");
 
-        var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                                  .Where(p => p.CanRead)
-                                  .ToList();
+        var properties = PropertyCache<T>.ReadableProperties;
 
         // Write Headers
         for (int i = 0; i < properties.Count; i++)
@@ -432,16 +1007,17 @@ public sealed class ExcelWorksheet
     /// <summary>
     /// Exports the rows of the worksheet back to a strongly typed collection of objects.
     /// </summary>
-    public IEnumerable<T> Export<T>(int startRow = 1, int startColumn = 1) where T : class, new()
+    /// <param name="startRow">The 1-based start row index.</param>
+    /// <param name="startColumn">The 1-based start column index.</param>
+    /// <param name="endRow">Optional 1-based end row index (0 or less for MaxRow).</param>
+    public IEnumerable<T> Export<T>(int startRow = 1, int startColumn = 1, int endRow = 0) where T : class, new()
     {
         if (startRow < 1 || startColumn < 1) throw new ArgumentOutOfRangeException("Start coordinates must be >= 1.");
 
-        var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                                  .Where(p => p.CanWrite)
-                                  .ToDictionary(p => p.Name.ToUpperInvariant(), p => p);
+        var properties = PropertyCache<T>.WriteableProperties;
 
-        int maxRow = MaxRow;
-        if (maxRow < startRow) yield break;
+        int limitRow = endRow > 0 ? Math.Min(endRow, MaxRow) : MaxRow;
+        if (limitRow < startRow) yield break;
 
         // Read headers
         var colMap = new Dictionary<int, PropertyInfo>();
@@ -455,7 +1031,7 @@ public sealed class ExcelWorksheet
             }
         }
 
-        for (int r = startRow + 1; r <= maxRow; r++)
+        for (int r = startRow + 1; r <= limitRow; r++)
         {
             var item = new T();
             bool hasAnyData = false;
@@ -468,12 +1044,11 @@ public sealed class ExcelWorksheet
                     var targetType = Nullable.GetUnderlyingType(mapping.Value.PropertyType) ?? mapping.Value.PropertyType;
                     try
                     {
-                        var converted = Convert.ChangeType(cellVal, targetType);
+                        var converted = Convert.ChangeType(cellVal, targetType, System.Globalization.CultureInfo.InvariantCulture);
                         mapping.Value.SetValue(item, converted);
                     }
                     catch
                     {
-                        // Fallback conversion logic
                         if (targetType == typeof(string))
                         {
                             mapping.Value.SetValue(item, cellVal.ToString());
@@ -574,6 +1149,59 @@ public sealed class ExcelWorksheet
         }
 
         return dt;
+    }
+
+    /// <summary>
+    /// Formats the used cells of this worksheet into CSV formatted text.
+    /// </summary>
+    /// <param name="delimiter">The column delimiter character (default ',').</param>
+    /// <param name="quoteCharacter">The quote character for escaping (default '"').</param>
+    /// <param name="encoding">Optional encoding (unused for string return).</param>
+    /// <param name="culture">Optional culture for formatting primitives.</param>
+    public string ToCsv(char delimiter = ',', char quoteCharacter = '"', System.Text.Encoding? encoding = null, System.Globalization.CultureInfo? culture = null)
+    {
+        return UsedRange.ToCsv(delimiter, quoteCharacter, encoding, culture);
+    }
+
+    /// <summary>
+    /// Serializes the populated worksheet rows into a JSON string.
+    /// </summary>
+    /// <param name="hasHeader">Whether top row contains headers for JSON property names (default true).</param>
+    public string ToJson(bool hasHeader = true)
+    {
+        return UsedRange.ToJson(hasHeader);
+    }
+
+    /// <summary>
+    /// Exports sheet contents back to a DataTable (alias for <see cref="ExportToDataTable"/>).
+    /// </summary>
+    /// <param name="hasHeader">Whether top row contains column headers (default true).</param>
+    public DataTable ToDataTable(bool hasHeader = true)
+    {
+        return ExportToDataTable(1, 1, hasHeader);
+    }
+
+    /// <summary>
+    /// Exports sheet rows to POCO objects of type <typeparamref name="T"/> (alias for <see cref="Export{T}"/>).
+    /// </summary>
+    /// <typeparam name="T">The target POCO class type.</typeparam>
+    /// <param name="startRow">The 1-based start row (default 1).</param>
+    /// <param name="startColumn">The 1-based start column (default 1).</param>
+    public IEnumerable<T> ToObjects<T>(int startRow = 1, int startColumn = 1) where T : class, new()
+    {
+        return Export<T>(startRow, startColumn);
+    }
+
+    /// <summary>
+    /// Converts sheet rows to a list of header-mapped dictionaries.
+    /// </summary>
+    /// <param name="startRow">1-based row index to start from (default 1).</param>
+    /// <param name="startColumn">1-based column index to start from (default 1).</param>
+    /// <param name="hasHeader">Whether top row contains column headers (default true).</param>
+    public List<Dictionary<string, object?>> ToDictionaryList(int startRow = 1, int startColumn = 1, bool hasHeader = true)
+    {
+        if (MaxRow < startRow || MaxColumn < startColumn) return new List<Dictionary<string, object?>>();
+        return Range(startRow, startColumn, MaxRow, MaxColumn).ToDictionaryList(hasHeader);
     }
 
     #endregion

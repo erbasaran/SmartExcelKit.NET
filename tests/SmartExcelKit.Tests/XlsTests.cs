@@ -3,8 +3,12 @@ using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for legacy binary XLS (BIFF8/OLE2) record parsing.
+/// </summary>
 public class XlsTests
 {
+    /// <summary>Tests reading BIFF8 binary workbook stream symmetrically.</summary>
     [Fact]
     public void XlsProvider_ShouldReadBiff8FormatSymmetrically()
     {

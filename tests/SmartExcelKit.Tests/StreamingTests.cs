@@ -1,11 +1,17 @@
+using System.IO;
+using System.Linq;
 using FluentAssertions;
 using SmartExcelKit.Streaming;
 using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for streaming reader and writer.
+/// </summary>
 public class StreamingTests
 {
+    /// <summary>Tests streaming writer and reader round-trip functionality.</summary>
     [Fact]
     public void StreamingWriterAndReader_ShouldWriteAndReadSymmetrically()
     {

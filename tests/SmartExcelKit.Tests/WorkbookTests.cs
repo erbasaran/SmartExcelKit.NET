@@ -1,11 +1,16 @@
+using System;
 using FluentAssertions;
 using SmartExcelKit.Core;
 using Xunit;
 
 namespace SmartExcelKit.Tests;
 
+/// <summary>
+/// Unit tests for ExcelWorkbook core operations.
+/// </summary>
 public class WorkbookTests
 {
+    /// <summary>Tests creating empty worksheet in workbook.</summary>
     [Fact]
     public void Workbook_ShouldCreateEmptySheetWithCorrectName()
     {
@@ -19,6 +24,7 @@ public class WorkbookTests
         workbook.Worksheets.Count.Should().Be(1);
     }
 
+    /// <summary>Tests duplicate worksheet name validation.</summary>
     [Fact]
     public void Workbook_ShouldThrowOnDuplicateWorksheetName()
     {
@@ -33,6 +39,7 @@ public class WorkbookTests
         act.Should().Throw<Exception>();
     }
 
+    /// <summary>Tests CellAddress parsing symmetry.</summary>
     [Fact]
     public void CellAddress_ParseAndFormat_ShouldBeSymmetric()
     {
@@ -45,6 +52,7 @@ public class WorkbookTests
         cell.Address.Should().Be("AB12");
     }
 
+    /// <summary>Tests RangeAddress containment helper.</summary>
     [Fact]
     public void RangeAddress_Contains_ShouldWorkCorrectly()
     {
@@ -59,6 +67,7 @@ public class WorkbookTests
         range.Contains(new CellAddress(5, 4)).Should().BeFalse(); // Outside
     }
 
+    /// <summary>Tests Range value assignment.</summary>
     [Fact]
     public void Range_SetValue_ShouldApplyToAllCells()
     {
@@ -77,6 +86,7 @@ public class WorkbookTests
         sheet.Cell("B2").Value.Should().Be(100.0);
     }
 
+    /// <summary>Tests worksheet protection and unprotection.</summary>
     [Fact]
     public void Sheet_ProtectAndUnprotect_ShouldWorkSymmetrically()
     {
@@ -98,6 +108,7 @@ public class WorkbookTests
         sheet.ProtectionPasswordHash.Should().BeNull();
     }
 
+    /// <summary>Tests worksheet cell merging and unmerging.</summary>
     [Fact]
     public void Sheet_MergeAndUnmerge_ShouldTrackCorrectly()
     {
@@ -120,4 +131,3 @@ public class WorkbookTests
         sheet.MergedRanges.Count.Should().Be(0);
     }
 }
-

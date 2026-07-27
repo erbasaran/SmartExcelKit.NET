@@ -15,10 +15,68 @@ public sealed class ExcelWorkbook : IDisposable
     private readonly StyleRegistry _styleRegistry = new();
     private readonly DocumentProperties _properties = new();
 
+    private int _activeWorksheetIndex = 0;
+
     /// <summary>
     /// Gets the list of worksheets in the workbook.
     /// </summary>
     public IReadOnlyList<ExcelWorksheet> Worksheets => _worksheets;
+
+    /// <summary>
+    /// Gets or sets the active worksheet. Returns the first worksheet if not set, or creates a default worksheet if none exists.
+    /// </summary>
+    public ExcelWorksheet ActiveWorksheet
+    {
+        get
+        {
+            if (_worksheets.Count == 0)
+            {
+                return AddWorksheet("Sheet1");
+            }
+            if (_activeWorksheetIndex < 0 || _activeWorksheetIndex >= _worksheets.Count)
+            {
+                _activeWorksheetIndex = 0;
+            }
+            return _worksheets[_activeWorksheetIndex];
+        }
+        set
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            int idx = _worksheets.IndexOf(value);
+            if (idx < 0)
+                throw new ArgumentException("The specified worksheet does not belong to this workbook.", nameof(value));
+            _activeWorksheetIndex = idx;
+        }
+    }
+
+    /// <summary>
+    /// Gets a worksheet by name (case-insensitive).
+    /// </summary>
+    /// <param name="name">The worksheet name.</param>
+    /// <returns>The matching <see cref="ExcelWorksheet"/>.</returns>
+    /// <exception cref="WorksheetException">Thrown if no worksheet with the specified name is found.</exception>
+    public ExcelWorksheet this[string name]
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Worksheet name cannot be null or empty.", nameof(name));
+
+            var ws = _worksheets.Find(w => string.Equals(w.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (ws == null)
+            {
+                throw new WorksheetException($"Worksheet '{name}' was not found in the workbook.", "WORKSHEET_NOT_FOUND");
+            }
+            return ws;
+        }
+    }
+
+    /// <summary>
+    /// Gets a worksheet by 0-based index.
+    /// </summary>
+    /// <param name="index">The 0-based worksheet index.</param>
+    /// <returns>The <see cref="ExcelWorksheet"/> at the specified index.</returns>
+    public ExcelWorksheet this[int index] => _worksheets[index];
 
     /// <summary>
     /// Gets the global style registry.

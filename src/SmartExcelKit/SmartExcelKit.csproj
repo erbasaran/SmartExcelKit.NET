@@ -4,7 +4,7 @@
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<AssemblyName>SmartExcelKit</AssemblyName>
 		<PackageId>SmartExcelKit</PackageId>
-		<Version>1.0.0</Version>
+		<Version>1.0.3</Version>
 		<Authors>Ramazan Erbasaran</Authors>
 		<Copyright>Copyright © 2026 Ramazan Erbasaran</Copyright>
 		<Description>A lightweight, ultra-fast, and memory-optimized .NET Standard 2.0 library to read, write, and stream spreadsheet files (XLSX, XLS, CSV, TSV, HTML, XML 2003, JSON). Features native XLS binary reading (BIFF8/OLE2), a zero-allocation streaming reader/writer, automatic file format signature detection, and an independent Excel formula calculation engine with cycle reference verification.</Description>

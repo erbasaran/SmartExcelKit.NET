@@ -29,4 +29,9 @@ internal sealed class CellData
     /// Gets or sets the cell's hyperlink URL or reference.
     /// </summary>
     public string? Hyperlink { get; set; }
+
+    /// <summary>
+    /// Gets whether this cell data is empty (no value, formula, comment, hyperlink, or non-default style).
+    /// </summary>
+    public bool IsEmpty => Value == null && string.IsNullOrEmpty(Formula) && string.IsNullOrEmpty(Comment) && string.IsNullOrEmpty(Hyperlink) && StyleId == 0;
 }

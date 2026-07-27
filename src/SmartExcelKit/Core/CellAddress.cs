@@ -122,8 +122,10 @@ public readonly struct CellAddress : IEquatable<CellAddress>
     /// <inheritdoc />
     public override int GetHashCode()
     {
-        // Simple hash combining row and column
-        return (Row * 397) ^ Column;
+        unchecked
+        {
+            return (Row * 397) + Column;
+        }
     }
 
     /// <summary>Compares two CellAddress values for equality.</summary>
