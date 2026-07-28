@@ -1,9 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using FluentAssertions;
 using SmartExcelKit.Core;
-using SmartExcelKit.Styles;
 using Xunit;
 
 namespace SmartExcelKit.Tests;

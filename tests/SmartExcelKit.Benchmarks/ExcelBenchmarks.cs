@@ -1,7 +1,7 @@
+using System.Text;
 using BenchmarkDotNet.Attributes;
 using SmartExcelKit.Csv;
 using SmartExcelKit.Formula;
-using System.Text;
 
 namespace SmartExcelKit.Benchmarks;
 

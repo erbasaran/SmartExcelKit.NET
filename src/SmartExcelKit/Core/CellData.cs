@@ -21,17 +21,32 @@ internal sealed class CellData
     public uint StyleId { get; set; }
 
     /// <summary>
-    /// Gets or sets cell comments.
+    /// Gets or sets cell comments text.
     /// </summary>
     public string? Comment { get; set; }
 
     /// <summary>
-    /// Gets or sets the cell's hyperlink URL or reference.
+    /// Gets or sets rich cell comment object.
+    /// </summary>
+    public ExcelComment? CommentObject { get; set; }
+
+    /// <summary>
+    /// Gets or sets the cell's hyperlink URL or reference text.
     /// </summary>
     public string? Hyperlink { get; set; }
 
     /// <summary>
-    /// Gets whether this cell data is empty (no value, formula, comment, hyperlink, or non-default style).
+    /// Gets or sets rich hyperlink object.
     /// </summary>
-    public bool IsEmpty => Value == null && string.IsNullOrEmpty(Formula) && string.IsNullOrEmpty(Comment) && string.IsNullOrEmpty(Hyperlink) && StyleId == 0;
+    public ExcelHyperlink? HyperlinkObject { get; set; }
+
+    /// <summary>
+    /// Gets or sets rich text runs.
+    /// </summary>
+    public RichText? RichText { get; set; }
+
+    /// <summary>
+    /// Gets whether this cell data is empty (no value, formula, comment, hyperlink, rich text, or non-default style).
+    /// </summary>
+    public bool IsEmpty => Value == null && string.IsNullOrEmpty(Formula) && string.IsNullOrEmpty(Comment) && CommentObject == null && string.IsNullOrEmpty(Hyperlink) && HyperlinkObject == null && RichText == null && StyleId == 0;
 }

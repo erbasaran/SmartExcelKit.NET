@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 using SmartExcelKit.Core;
 using SmartExcelKit.Styles;
@@ -97,7 +96,7 @@ public sealed class ExcelCell : IEquatable<ExcelCell>
     }
 
     /// <summary>
-    /// Gets or sets the comment associated with this cell.
+    /// Gets or sets the comment string associated with this cell.
     /// </summary>
     public string? Comment
     {
@@ -106,12 +105,39 @@ public sealed class ExcelCell : IEquatable<ExcelCell>
     }
 
     /// <summary>
-    /// Gets or sets the hyperlink associated with this cell.
+    /// Gets or sets the rich comment object associated with this cell.
+    /// </summary>
+    public ExcelComment? CommentObject
+    {
+        get => _worksheet.GetCellCommentObject(_address);
+        set => _worksheet.SetCellCommentObject(_address, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the hyperlink target string associated with this cell.
     /// </summary>
     public string? Hyperlink
     {
         get => _worksheet.GetCellHyperlink(_address);
         set => _worksheet.SetCellHyperlink(_address, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the rich hyperlink object associated with this cell.
+    /// </summary>
+    public ExcelHyperlink? HyperlinkObject
+    {
+        get => _worksheet.GetCellHyperlinkObject(_address);
+        set => _worksheet.SetCellHyperlinkObject(_address, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the rich text runs associated with this cell.
+    /// </summary>
+    public RichText? RichText
+    {
+        get => _worksheet.GetCellRichText(_address);
+        set => _worksheet.SetCellRichText(_address, value);
     }
 
     /// <summary>

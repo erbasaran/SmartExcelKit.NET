@@ -3,13 +3,15 @@
 [![NuGet Version](https://img.shields.io/nuget/v/SmartExcelKit.svg)](https://www.nuget.org/packages/SmartExcelKit)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-SmartExcelKit is a modern, high-performance, low-allocation .NET Standard 2.0 library designed for reading, writing, and evaluating spreadsheet files (XLSX, XLS, CSV, TSV, HTML, XML Spreadsheet 2003, JSON).
+**SmartExcelKit** is a lightweight, ultra-fast, low-allocation .NET Standard 2.0 library for reading, writing, streaming, and evaluating spreadsheet files across multiple formats (**XLSX**, **XLS**, **CSV**, **TSV**, **HTML Table**, **XML Spreadsheet 2003**, **JSON**).
+
+Designed with performance as the top priority, SmartExcelKit uses **pooled buffers (`ArrayPool<T>`)**, **lazy enumerations**, **O(1) bounds caching**, and **forward-only streaming** to deliver maximum throughput with minimal GC allocation.
 
 ---
 
 ## Target Frameworks
 
-- **SmartExcelKit**: `.NET Standard 2.0` (Supports .NET Core 2.0+, .NET 5+, .NET 6/7/8/9/10+, and .NET Framework 4.6.1+).
+- **.NET Standard 2.0**: Compatible with .NET Core 2.0+, .NET 5+, .NET 6/7/8/9/10+, and .NET Framework 4.6.1+.
 
 ---
 
@@ -21,297 +23,542 @@ dotnet add package SmartExcelKit
 
 ---
 
-## Complete API Guide & Examples
+## Supported Formats
 
-### 1. Open Workbook
+| Format | Extension | Read | Write | Description |
+| :--- | :---: | :---: | :---: | :--- |
+| **XLSX** | `.xlsx` | ✅ | ✅ | Standard Microsoft Excel OpenXML Workbook |
+| **XLS** | `.xls` | ✅ | ❌ | Legacy Microsoft Excel Binary Format (BIFF8 / OLE2) |
+| **CSV** | `.csv` | ✅ | ✅ | Comma-Separated Values |
+| **TSV** | `.tsv` | ✅ | ✅ | Tab-Separated Values |
+| **HTML** | `.html`, `.htm` | ✅ | ✅ | HTML Table Spreadsheet Markup |
+| **XML 2003** | `.xml` | ✅ | ✅ | Microsoft Excel 2003 XML SpreadsheetML |
+| **JSON** | `.json` | ✅ | ✅ | Structured JSON Array / Document |
 
-Load workbooks seamlessly from file paths, streams, or raw byte arrays with automatic format detection.
+---
+
+## Developer Guide & Complete Code Examples
+
+### 1. Open Workbooks (Auto-Format Detection)
+
+Load workbooks from file paths, streams, or byte arrays. Format is auto-detected from magic byte signatures or extensions.
 
 ```csharp
 using SmartExcelKit;
+using SmartExcelKit.Core;
 
-// 1. Open from file path (auto-detects extension & signature)
+// 1. Open from file path (sync & async)
 using var workbook1 = ExcelWorkbook.Open("data.xlsx");
+using var workbook2 = await ExcelWorkbook.OpenAsync("data.csv");
 
-// 2. Open asynchronously from file path
-using var workbook2 = await ExcelWorkbook.OpenAsync("data.xlsx");
-
-// 3. Open from a stream
-using var stream = File.OpenRead("data.csv");
+// 2. Open from stream or byte array
+using var stream = File.OpenRead("legacy.xls");
 using var workbook3 = ExcelWorkbook.Open(stream);
 
-// 4. Open from byte array
-byte[] fileBytes = File.ReadAllBytes("legacy.xls");
-using var workbook4 = ExcelWorkbook.Open(fileBytes);
+byte[] bytes = File.ReadAllBytes("data.json");
+using var workbook4 = ExcelWorkbook.Open(bytes);
+
+// 3. Detect format explicitly
+ExcelFileFormat format = ExcelWorkbook.DetectFormat(stream, "data.xlsx");
 ```
 
 ---
 
-### 2. Create Workbook
+### 2. Create & Save Workbooks
 
-Create new workbooks, add worksheets, set cell values and formulas, apply styles, and save to any supported format.
+Create workbooks, set active sheets, apply protection, and save to files or streams.
 
 ```csharp
 using SmartExcelKit;
-using SmartExcelKit.Styles;
 
 using var workbook = new ExcelWorkbook();
-var sheet = workbook.AddWorksheet("Inventory");
+var sheet = workbook.AddWorksheet("MainSheet");
 
-// Set cell values
-sheet.Cell("A1").Value = "Product Name";
-sheet.Cell("B1").Value = "Unit Price";
-sheet.Cell("C1").Value = "Quantity";
-sheet.Cell("D1").Value = "Total Value";
+// Set active worksheet
+workbook.ActiveWorksheet = sheet;
 
-sheet.Cell("A2").Value = "Mechanical Keyboard";
-sheet.Cell("B2").Value = 129.99;
-sheet.Cell("C2").Value = 15;
-sheet.Cell("D2").Formula = "B2*C2";
+// Workbook protection
+workbook.Protect("WorkbookPassword123");
+bool isProtected = workbook.IsProtected;
+workbook.Unprotect();
 
-// Create & apply styled range
-var headerStyle = new ExcelStyle(
-    font: new ExcelFont(name: "Segoe UI", size: 11, bold: true, color: "FFFFFF"),
-    fill: new ExcelFill(ExcelFillPatternType.Solid, backgroundColor: "1F4E79"),
-    alignment: new ExcelAlignment(horizontal: ExcelHorizontalAlignment.Center)
-);
-sheet.Range("A1:D1").Style = headerStyle;
+// Save to file or stream (sync & async)
+workbook.Save("output.xlsx");
+await workbook.SaveAsync("output.xlsx");
 
-// Save workbook (format auto-detected via extension)
-workbook.Save("inventory.xlsx");
+using var outStream = File.Create("output.csv");
+workbook.Save(outStream, ExcelFileFormat.Csv);
 ```
 
 ---
 
-### 3. Worksheet Navigation
+### 3. Worksheet Management & Navigation
 
-Access sheets by name, 0-based index, or active worksheet reference.
+Access sheets by name or 0-based index, remove sheets, or protect individual worksheets.
 
 ```csharp
-using var workbook = ExcelWorkbook.Open("data.xlsx");
+var sheet1 = workbook["MainSheet"];       // Access by name
+var sheet2 = workbook[0];                 // Access by 0-based index
 
-// Access worksheet by name via indexer
-ExcelWorksheet sheetByName = workbook["Inventory"];
+// Add / Remove worksheets
+var newSheet = workbook.AddWorksheet("Draft");
+workbook.RemoveWorksheet("Draft");
 
-// Access worksheet by 0-based index
-ExcelWorksheet sheetByIndex = workbook[0];
-
-// Access or set ActiveWorksheet
-ExcelWorksheet activeSheet = workbook.ActiveWorksheet;
-workbook.ActiveWorksheet = sheetByName;
+// Worksheet protection
+sheet1.Protect("SheetPassword123");
+sheet1.Unprotect();
 ```
 
 ---
 
-### 4. Rows Enumeration
+### 4. Row & Column Operations
 
-Lazily iterate all populated rows or access individual rows by 1-based index.
+Manage heights, widths, visibility, grouping, auto-fit, and insert/delete operations.
 
 ```csharp
 var sheet = workbook.ActiveWorksheet;
 
-// Lazy enumeration over all populated rows
-foreach (ExcelRow row in sheet.Rows)
-{
-    Console.WriteLine($"Row {row.Index} - Height: {row.Height}, Hidden: {row.Hidden}, IsEmpty: {row.IsEmpty}");
-}
+// Row properties
+ExcelRow row = sheet.Row(1);
+row.Height = 30.0;
+row.Hidden = false;
 
-// Access specific row by index
-ExcelRow thirdRow = sheet.Row(3);
-thirdRow.Height = 28.0;
-thirdRow.Hidden = false;
-```
+// Column properties
+ExcelColumn col = sheet.Column(1); // Column 'A'
+col.Width = 25.0;
+col.AutoFit();                     // Auto-fit column width based on content
 
----
+// Insert & Delete Rows / Columns
+sheet.InsertRows(startRow: 2, count: 5);
+sheet.DeleteRows(startRow: 10, count: 2);
 
-### 5. Columns Enumeration
+sheet.InsertColumns(startColumn: 2, count: 1);
+sheet.DeleteColumns(startColumn: 5, count: 1);
 
-Lazily iterate all columns, query column letters, or modify widths and visibility.
+// Group & Ungroup Rows / Columns
+sheet.GroupRows(fromRow: 2, toRow: 10);
+sheet.UngroupRows(fromRow: 2, toRow: 10);
 
-```csharp
-var sheet = workbook.ActiveWorksheet;
+sheet.GroupColumns(fromColumn: 1, toColumn: 3);
+sheet.UngroupColumns(fromColumn: 1, toColumn: 3);
 
-// Lazy enumeration over all populated columns
-foreach (ExcelColumn col in sheet.Columns)
-{
-    Console.WriteLine($"Column {col.Letter} ({col.Index}) - Width: {col.Width}, IsEmpty: {col.IsEmpty}");
-}
-
-// Access specific column by index
-ExcelColumn colB = sheet.Column(2); // Column 'B'
-colB.Width = 22.5;
-colB.AutoFit();
-```
-
----
-
-### 6. Cells Enumeration
-
-Iterate cells sequentially over a range or worksheet without intermediate array allocations.
-
-```csharp
-var range = sheet.Range("A1:C10");
-
-// Enumerates all cells in range row-by-row
-foreach (ExcelCell cell in range.Cells)
-{
-    Console.WriteLine($"{cell.Address} = {cell.Value}");
-}
-```
-
----
-
-### 7. UsedRange
-
-Retrieve the bounding box of all populated cells in O(1) cached time.
-
-```csharp
-ExcelRange usedRange = sheet.UsedRange;
-
-Console.WriteLine($"Used Range Address : {usedRange.Address.Address}");
-Console.WriteLine($"Used Rows Count    : {sheet.UsedRowCount}");
-Console.WriteLine($"Used Columns Count : {sheet.UsedColumnCount}");
-Console.WriteLine($"Max Row            : {sheet.MaxRow}");
-Console.WriteLine($"Max Column         : {sheet.MaxColumn}");
-```
-
----
-
-### 8. CellsUsed
-
-Lazily enumerate only cells that contain actual values, formulas, comments, hyperlinks, or non-default styles.
-
-```csharp
-// Zero-allocation iteration over used cells only
-foreach (ExcelCell cell in sheet.CellsUsed())
-{
-    Console.WriteLine($"Cell {cell.Address} ({cell.RowNumber}, {cell.ColumnNumber}) = {cell.Value}");
-}
-```
-
----
-
-### 9. RowsUsed
-
-Find the first, last, or all rows containing populated data.
-
-```csharp
+// First & Last Used Row / Column
 ExcelRow? firstRow = sheet.FirstRowUsed();
 ExcelRow? lastRow  = sheet.LastRowUsed();
-
-Console.WriteLine($"First row with data: {firstRow?.Index}");
-Console.WriteLine($"Last row with data : {lastRow?.Index}");
-
-// Iterate populated rows only
-foreach (ExcelRow row in sheet.RowsUsed())
-{
-    Console.WriteLine($"Row {row.Index} contains {row.CellsUsed().Count()} used cells.");
-}
-```
-
----
-
-### 10. ColumnsUsed
-
-Find the first, last, or all columns containing populated data.
-
-```csharp
 ExcelColumn? firstCol = sheet.FirstColumnUsed();
 ExcelColumn? lastCol  = sheet.LastColumnUsed();
-
-Console.WriteLine($"First col with data: {firstCol?.Letter}");
-Console.WriteLine($"Last col with data : {lastCol?.Letter}");
-
-// Iterate populated columns only
-foreach (ExcelColumn col in sheet.ColumnsUsed())
-{
-    Console.WriteLine($"Column {col.Letter} contains data.");
-}
 ```
 
 ---
 
-### 11. Range Operations
+### 5. Cell Reading & Writing (Type-Safe Getters)
 
-Perform bulk styling, value assignment, clear, merge, and copy operations across ranges.
+Set and read cell values with type safety and fallback default values.
+
+```csharp
+// Cell assignment via address string or row/column numbers
+sheet.Cell("A1").Value = "Product Name";
+sheet.Cell(1, 2).Value = 199.99;
+sheet["A3"].Value = DateTime.UtcNow;
+sheet[1, 4].Value = true;
+
+// Type-safe getters
+ExcelCell cell = sheet.Cell("B1");
+
+string strVal  = cell.GetString();
+int intVal     = cell.GetInt32();
+long longVal   = cell.GetInt64();
+double dblVal  = cell.GetDouble();
+decimal decVal = cell.GetDecimal();
+bool boolVal   = cell.GetBoolean();
+DateTime dtVal = cell.GetDateTime();
+
+// Generic getter & TryGetValue with fallback
+if (cell.HasValue)
+{
+    double val = cell.GetValue<double>();
+    
+    if (cell.TryGetValue<int>(out int parsedCount))
+    {
+        Console.WriteLine($"Count: {parsedCount}");
+    }
+}
+
+int fallback = cell.GetValueOrDefault<int>(defaultValue: 0);
+```
+
+---
+
+### 6. Range Operations & Bulk Matrix Access
+
+Perform bulk formatting, matrix assignments, clearing, merging, and copying.
 
 ```csharp
 var range = sheet.Range("A1:D10");
-
-// Bulk value assignment
-range.Value = "Default Text";
+// Or range by coordinates: sheet.Range(startRow: 1, startColumn: 1, endRow: 10, endColumn: 4);
 
 // Merge & Unmerge
 range.Merge();
 range.Unmerge();
 
-// Clear contents or styles
-range.ClearContents(); // Clears values and formulas only
-range.ClearStyles();   // Resets formatting to default
-range.Clear();          // Clears everything (values, formulas, styles, comments, hyperlinks)
+// Clear Operations
+range.ClearContents(); // Clears values and formulas
+range.ClearStyles();   // Resets styles to default
+range.Clear();         // Clears values, formulas, styles, comments, hyperlinks
 
-// Copy range to destination
+// Bulk Copy
 var targetRange = sheet.Range("F1:I10");
 range.CopyTo(targetRange);
-```
 
----
-
-### 12. Cell Access
-
-Intuitive cell access via functions or indexers on worksheets, ranges, rows, and columns.
-
-```csharp
-// Method call access
-sheet.Cell("A1").Value = "Title";
-sheet.Cell(1, 1).Value = "Title";
-
-// Indexer access on worksheet
-sheet["A1"].Value = "Title";
-sheet[1, 1].Value = "Title";
-
-// Access via Row or Column wrappers
-sheet.Row(1)[1].Value = "Title";
-sheet.Column(1)[1].Value = "Title";
-```
-
----
-
-### 13. Typed Value Reading
-
-Type-safe, null-safe helper methods and generic converters.
-
-```csharp
-ExcelCell cell = sheet.Cell("B2");
-
-// Strongly typed convenience getters
-int intVal       = cell.GetInt32();
-long longVal     = cell.GetInt64();
-double doubleVal = cell.GetDouble();
-decimal decVal   = cell.GetDecimal();
-bool boolVal     = cell.GetBoolean();
-DateTime dateVal = cell.GetDateTime();
-string strVal    = cell.GetString();
-
-// Generic type conversion
-if (cell.HasValue)
+// Bulk Matrix Value Assignment & Extraction
+object?[,] matrix = new object?[,]
 {
-    double price = cell.GetValue<double>();
-    
-    if (cell.TryGetValue<int>(out int count))
+    { "ID", "Name", "Price" },
+    { 101, "Keyboard", 89.99 },
+    { 102, "Mouse", 29.99 }
+};
+sheet.SetValues(matrix, startRow: 1, startColumn: 1);
+
+object?[,] extracted = sheet.GetValues(startRow: 1, startColumn: 1, endRow: 3, endColumn: 3);
+```
+
+---
+
+### 7. Cell Styling & Number Formatting
+
+Customize fonts, fills, borders, alignments, and number format strings.
+
+```csharp
+using SmartExcelKit.Styles;
+
+var customStyle = new ExcelStyle(
+    font: new ExcelFont(name: "Arial", size: 12, bold: true, italic: false, underline: true, color: "1F4E79"),
+    fill: new ExcelFill(ExcelFillPatternType.Solid, backgroundColor: "EBF1F5"),
+    border: new ExcelBorder(
+        left: new ExcelBorderItem(ExcelBorderStyle.Thin, color: "000000"),
+        right: new ExcelBorderItem(ExcelBorderStyle.Thin, color: "000000"),
+        top: new ExcelBorderItem(ExcelBorderStyle.Medium, color: "1F4E79"),
+        bottom: new ExcelBorderItem(ExcelBorderStyle.Medium, color: "1F4E79")
+    ),
+    alignment: new ExcelAlignment(
+        horizontal: ExcelHorizontalAlignment.Center,
+        vertical: ExcelVerticalAlignment.Center,
+        wrapText: true,
+        indent: 1
+    ),
+    numberFormat: new ExcelNumberFormat("$#,##0.00")
+);
+
+// Apply style to cell or range
+sheet.Cell("B2").Style = customStyle;
+sheet.Range("A1:D1").Style = customStyle;
+```
+
+---
+
+### 8. Excel Tables (ListObject) & Totals Row
+
+Create native Excel Tables with custom styles and totals row aggregations.
+
+```csharp
+using SmartExcelKit.Tables;
+
+var table = sheet.Tables.Add("A1:C10", "SalesTable");
+
+// Table Properties
+table.StyleName = "TableStyleMedium9";
+table.ShowHeaderRow = true;
+table.ShowTotalsRow = true;
+table.ShowStripedRows = true;
+table.ShowStripedColumns = false;
+
+// Configure Totals Row Functions for Columns
+table["Price"].TotalsRowFunction = TotalsRowFunction.Average;
+table["Quantity"].TotalsRowFunction = TotalsRowFunction.Sum;
+table["ID"].TotalsRowFunction = TotalsRowFunction.Count;
+```
+
+---
+
+### 9. AutoFilter & Multi-Column Sorting
+
+Enable AutoFilters and perform multi-column, culture-aware sorting.
+
+```csharp
+// Enable AutoFilter over specific range or used range
+sheet.AutoFilter("A1:D100");
+sheet.ClearAutoFilter();
+
+// Multi-column sorting: sort rows 2-100 by Column 2 (ascending)
+sheet.Sort(
+    startRow: 2, startColumn: 1,
+    endRow: 100, endColumn: 4,
+    sortColumn: 2,
+    ascending: true,
+    culture: System.Globalization.CultureInfo.CurrentCulture
+);
+```
+
+---
+
+### 10. Conditional Formatting
+
+Apply color scales, data bars, value comparisons, or formula rules.
+
+```csharp
+using SmartExcelKit.Formatting;
+using SmartExcelKit.Styles;
+
+// 1. Cell Value Rule (Highlight values > 500 in red)
+var alertStyle = new ExcelStyle(font: new ExcelFont(bold: true, color: "FF0000"));
+sheet.ConditionalFormatting.AddCellValueRule("C2:C100", ConditionalFormattingOperator.GreaterThan, "500", alertStyle);
+
+// 2. Data Bar Gradient Visualization
+sheet.ConditionalFormatting.AddDataBar("D2:D100", colorHex: "00FF00");
+
+// 3. 2-Color & 3-Color Scales
+sheet.ConditionalFormatting.AddTwoColorScale("E2:E100", minColorHex: "FFFFFF", maxColorHex: "0000FF");
+sheet.ConditionalFormatting.AddThreeColorScale("F2:F100", minColorHex: "FF0000", midColorHex: "FFFF00", maxColorHex: "00FF00");
+
+// 4. Formula Rule
+sheet.ConditionalFormatting.AddFormulaRule("A2:A100", "ISODD(ROW())", alertStyle);
+```
+
+---
+
+### 11. Data Validation Rules
+
+Add drop-down lists, numeric ranges, text length limits, date constraints, or custom formulas.
+
+```csharp
+using SmartExcelKit.Validation;
+
+// 1. List Validation (Drop-down menu)
+sheet.DataValidations.AddListValidation("A2:A100", new[] { "Approved", "Pending", "Rejected" });
+
+// 2. Whole Number & Decimal Validation
+sheet.DataValidations.AddWholeNumberValidation("B2:B100", ValidationOperator.Between, min: 1, max: 100);
+sheet.DataValidations.AddDecimalValidation("C2:C100", ValidationOperator.GreaterThan, min: 0.0);
+
+// 3. Date & Text Length Validation
+sheet.DataValidations.AddDateValidation("D2:D100", ValidationOperator.GreaterThanOrEqual, minDate: DateTime.Today);
+sheet.DataValidations.AddTextLengthValidation("E2:E100", ValidationOperator.LessThanOrEqual, maxLen: 50);
+
+// 4. Custom Formula Validation & Alert Configuration
+var customVal = sheet.DataValidations.AddCustomValidation("F2:F100", "=AND(F2>0, F2<1000)");
+customVal.ShowErrorMessage = true;
+customVal.ErrorTitle = "Invalid Entry";
+customVal.ErrorMessage = "Value must be between 0 and 1000.";
+```
+
+---
+
+### 12. Formula Engine & Recalculation
+
+Evaluate 60+ built-in functions with dependency tracking and calculation caching.
+
+```csharp
+using SmartExcelKit.Formula;
+
+sheet["A1"].Value = 100;
+sheet["A2"].Value = 200;
+sheet["A3"].Formula = "SUM(A1:A2)";
+sheet["A4"].Formula = "AVERAGE(A1:A3)";
+sheet["A5"].Formula = "VLOOKUP(100, A1:A2, 1, FALSE)";
+
+// Recalculate dependent cell formulas across the entire workbook
+workbook.Recalculate();
+
+// Evaluate formula directly without placing it in a cell
+object? evalResult = FormulaEvaluator.Evaluate("MAX(A1:A2) * 1.1", sheet);
+Console.WriteLine($"Result: {evalResult}");
+```
+
+---
+
+### 13. Rich Text, Hyperlinks & Cell Comments
+
+Attach formatted text runs, hyperlinks, and styled notes to cells.
+
+```csharp
+using SmartExcelKit.Core;
+
+var cell = sheet["A1"];
+
+// 1. Rich Text
+var rich = new RichText();
+rich.AddBold("Status: ", fontSize: 11, fontColorHex: "0000FF");
+rich.AddItalic("Action Required", fontSize: 10, fontColorHex: "FF0000");
+cell.RichText = rich;
+
+// 2. Hyperlinks (Internal, External, Email, File)
+cell.HyperlinkObject = ExcelHyperlink.External("https://github.com", tooltip: "Open Web Site");
+cell.HyperlinkObject = ExcelHyperlink.Internal("Sheet2", "B5", tooltip: "Jump to Sheet2");
+cell.HyperlinkObject = ExcelHyperlink.Email("support@example.com", subject: "Inquiry");
+
+// 3. Cell Comments
+cell.CommentObject = new ExcelComment("Please verify this figure before publishing.", author: "Financial Controller");
+```
+
+---
+
+### 14. Images, Native Charts & Pivot Tables
+
+Embed visual elements directly into worksheets.
+
+```csharp
+using SmartExcelKit.Drawings;
+using SmartExcelKit.Core;
+
+// 1. Embedded Image (PNG, JPEG, SVG, GIF, BMP)
+var img = ExcelImage.FromFile("logo.png", topRow: 1, leftColumn: 5, width: 200, height: 100);
+sheet.Images.Add(img);
+
+// 2. Native Chart (Column, Bar, Line, Pie, Area, Scatter, Doughnut)
+var chart = new ExcelChart(ChartType.Column, topRow: 5, leftColumn: 5, width: 450, height: 300);
+chart.Title = "Quarterly Revenue";
+chart.AddSeries("Sales", "Sheet1!B2:B10");
+sheet.Charts.Add(chart);
+
+// 3. Embedded Pivot Table
+var pivot = new ExcelPivotTable("SalesPivot", "Sheet1!A1:D100", targetCell: new CellAddress(15, 5));
+pivot.AddRowField("Category");
+pivot.AddColumnField("Year");
+pivot.AddDataField("Revenue", PivotSummaryFunction.Sum);
+pivot.AddFilterField("Region");
+sheet.PivotTables.Add(pivot);
+```
+
+---
+
+### 15. Page Setup & Print Settings
+
+Configure orientation, paper size, print areas, margins, and headers/footers.
+
+```csharp
+using SmartExcelKit.PageSetup;
+
+var setup = sheet.PageSetup;
+setup.Orientation = PageOrientation.Landscape;
+setup.PaperSize = PaperSize.A4;
+setup.PrintArea = "A1:G50";
+setup.PrintGridlines = true;
+setup.PrintHeadings = true;
+
+// Fit to Pages
+setup.FitToPages = true;
+setup.FitToWidth = 1;
+setup.FitToHeight = 2;
+
+// Headers & Footers
+setup.HeaderCenter = "Quarterly Financial Report";
+setup.FooterRight = "Page 1 of 10";
+
+// Margins (in inches)
+setup.MarginLeft = 0.75;
+setup.MarginRight = 0.75;
+setup.MarginTop = 1.0;
+setup.MarginBottom = 1.0;
+```
+
+---
+
+### 16. Named Ranges (Workbook & Worksheet Scoped)
+
+Create and manage named ranges globally or scoped to a specific worksheet.
+
+```csharp
+using SmartExcelKit.Core;
+
+// Workbook-scoped named range
+workbook.NamedRanges.Add("GlobalTaxRate", "Sheet1!$Z$1");
+
+// Worksheet-scoped named range
+sheet.NamedRanges.Add("LocalData", "Sheet1!$A$1:$D$50");
+
+// Access named range
+ExcelNamedRange taxRange = workbook.NamedRanges["GlobalTaxRate"];
+```
+
+---
+
+### 17. High-Performance Streaming Reader & Writer
+
+Process giant XLSX files with 1,000,000+ rows under 15 MB RAM.
+
+```csharp
+using SmartExcelKit.Streaming;
+
+// 1. Streaming Writer (Flat memory write)
+using var outStream = File.Create("large_export.xlsx");
+using var writer = new ExcelStreamingWriter(outStream);
+
+writer.BeginSheet("Data");
+writer.WriteRow(new object?[] { "ID", "User", "Timestamp" });
+
+// Sync & Async row streaming
+for (int i = 1; i <= 1000000; i++)
+{
+    writer.WriteRow(new object?[] { i, $"User_{i}", DateTime.UtcNow });
+}
+await writer.WriteRowAsync(new object?[] { 1000001, "FinalUser", DateTime.UtcNow });
+
+writer.EndSheet();
+
+// 2. Streaming Reader (Sync & Async forward-only read)
+using var inStream = File.OpenRead("large_export.xlsx");
+using var reader = new ExcelStreamingReader(inStream);
+
+foreach (string sheetName in reader.GetSheets())
+{
+    foreach (object?[] rowValues in reader.ReadRows(sheetName))
     {
-        Console.WriteLine($"Parsed count: {count}");
+        // Process row without memory overhead
     }
+
+    List<object?[]> allRowsAsync = await reader.ReadRowsAsync(sheetName);
 }
 ```
 
 ---
 
-### 14. Import POCO
+### 18. Delimited CSV & TSV Engine
 
-Import strongly typed objects into worksheet rows with automatic header generation.
+High-speed character buffer streaming parser for CSV/TSV files.
 
 ```csharp
+using SmartExcelKit.Csv;
+
+// 1. Detect Encoding & Delimiter automatically
+using var readStream = File.OpenRead("data.csv");
+var encoding = CsvEngine.DetectEncoding(readStream);
+char delimiter = CsvEngine.DetectDelimiter(readStream, encoding);
+
+// 2. Read Streaming
+foreach (List<string> rowFields in CsvEngine.ReadStreaming(readStream, delimiter, encoding))
+{
+    Console.WriteLine($"Col 0: {rowFields[0]}, Col 1: {rowFields[1]}");
+}
+
+// 3. Write CSV
+var rows = new List<List<string>>
+{
+    new() { "ID", "Name" },
+    new() { "1", "Alice" }
+};
+using var writeStream = File.Create("export.csv");
+CsvEngine.Write(writeStream, rows, delimiter: ',');
+```
+
+---
+
+### 19. POCO & DataTable Integration
+
+Import C# object collections or DataTables into worksheets, or export them back.
+
+```csharp
+using System.Data;
+
 public class Product
 {
     public string Name { get; set; } = string.Empty;
@@ -325,240 +572,56 @@ var products = new List<Product>
     new() { Name = "Mouse", Price = 25.50, Quantity = 40 }
 };
 
-var sheet = workbook.AddWorksheet("Products");
-sheet.Import(products, startRow: 1, startColumn: 1);
-```
+// 1. POCO Import & Export
+sheet.Import(products, startRow: 1, startColumn: 1, includeHeader: true);
+List<Product> exportedProducts = sheet.Export<Product>(startRow: 1, startColumn: 1).ToList();
 
----
-
-### 15. Export POCO
-
-Export sheet rows back to a strongly typed collection of POCOs matching header names.
-
-```csharp
-// Export worksheet rows back to POCO objects
-List<Product> items = sheet.Export<Product>(startRow: 1, startColumn: 1).ToList();
-
-foreach (var item in items)
-{
-    Console.WriteLine($"{item.Name}: ${item.Price} (Qty: {item.Quantity})");
-}
-```
-
----
-
-### 16. Import DataTable
-
-Import `DataTable` structures directly or export sheet content back to `DataTable`.
-
-```csharp
-using System.Data;
-
+// 2. DataTable Import & Export
 var dt = new DataTable("Orders");
-dt.Columns.Add("OrderID", typeof(int));
+dt.Columns.Add("ID", typeof(int));
 dt.Columns.Add("Customer", typeof(string));
-dt.Rows.Add(101, "Acme Corp");
+dt.Rows.Add(1, "Acme Corp");
 
-// Import DataTable to sheet
 sheet.Import(dt, startRow: 1, startColumn: 1, includeHeader: true);
-
-// Export sheet content back to DataTable
 DataTable exportedDt = sheet.ExportToDataTable(startRow: 1, startColumn: 1, hasHeader: true);
 ```
 
 ---
 
-### 17. Formula Engine
+### 20. Developer One-Liner Export & Conversion Helpers
 
-Parse and evaluate Excel formulas with dependency cycle protection.
-
-```csharp
-using SmartExcelKit.Formula;
-
-sheet.Cell("A1").Value = 50;
-sheet.Cell("A2").Value = 150;
-sheet.Cell("A3").Formula = "SUM(A1:A2)"; // Built-in formula linking
-
-// Direct formula evaluation
-object? result = FormulaEvaluator.Evaluate("AVERAGE(A1:A2) * 2", sheet);
-Console.WriteLine($"Evaluated Result: {result}"); // 200
-```
-
----
-
-### 18. Worksheet Protection
-
-Protect worksheets with password hashing compatible with standard Excel XOR protection.
+Quickly convert entire workbooks, worksheets, or rows directly to CSV, JSON, DataSet, DataTable, Dictionaries, or POCO collections without writing manual loops.
 
 ```csharp
-// Protect sheet with password
-sheet.Protect("SecretPassword123");
-Console.WriteLine(sheet.IsProtected); // True
-Console.WriteLine(sheet.ProtectionPasswordHash); // HEX Hash e.g. "DAA7"
+using System.Data;
 
-// Unprotect sheet
-sheet.Unprotect();
-```
+// 1. Workbook-Level One-Liners (Aggregates across ALL worksheets in the workbook)
+string fullWorkbookCsv  = workbook.ToCsv(delimiter: ',');
+string fullWorkbookJson = workbook.ToJson(hasHeader: true);
+DataSet workbookDataSet = workbook.ToDataSet(hasHeader: true);    // DataSet containing DataTables per sheet
+DataTable activeSheetDt = workbook.ToDataTable(hasHeader: true);
+List<Product> allPocos  = workbook.ToObjects<Product>().ToList();   // Maps POCOs across all sheets
+var allSheetDicts       = workbook.ToDictionaryList();             // List of dictionaries with '__Worksheet' key
 
----
+// 2. Worksheet-Level One-Liners
+string csvString   = sheet.ToCsv(delimiter: ',');
+string jsonString  = sheet.ToJson(hasHeader: true);
+DataTable dataTbl  = sheet.ToDataTable(hasHeader: true);
+var dictList       = sheet.ToDictionaryList(startRow: 1);
+List<Product> list = sheet.ToObjects<Product>().ToList();
 
-### 19. Streaming Reader
-
-Low-memory forward-only XML reader for processing massive files with millions of rows.
-
-```csharp
-using SmartExcelKit.Streaming;
-
-using var fs = File.OpenRead("large_data.xlsx");
-using var reader = new ExcelStreamingReader(fs);
-
-foreach (string sheetName in reader.GetSheets())
-{
-    foreach (object?[] rowValues in reader.ReadRows(sheetName))
-    {
-        Console.WriteLine($"Row: {string.Join(", ", rowValues)}");
-    }
-}
-```
-
----
-
-### 20. Streaming Writer
-
-Flat-memory forward-only ZIP stream writer that avoids string table allocations.
-
-```csharp
-using SmartExcelKit.Streaming;
-
-using var fs = File.Create("large_export.xlsx");
-using var writer = new ExcelStreamingWriter(fs);
-
-writer.BeginSheet("Data");
-writer.WriteRow(new object?[] { "ID", "Name", "Date" });
-
-for (int i = 1; i <= 1000000; i++)
-{
-    writer.WriteRow(new object?[] { i, $"User {i}", DateTime.UtcNow });
-}
-
-writer.EndSheet();
-```
-
----
-
-### 21. CSV Engine
-
-High-performance delimited parser utilizing pooled character memory (`ArrayPool<char>`).
-
-```csharp
-using SmartExcelKit.Csv;
-
-// Write CSV
-var rows = new List<List<string>>
-{
-    new() { "ID", "Description" },
-    new() { "1", "Keyboard, Wireless" }
-};
-using var writeStream = File.Create("output.csv");
-CsvEngine.Write(writeStream, rows, delimiter: ',');
-
-// Read CSV with auto-detected encoding & delimiter
-using var readStream = File.OpenRead("output.csv");
-var encoding = CsvEngine.DetectEncoding(readStream);
-char delimiter = CsvEngine.DetectDelimiter(readStream, encoding);
-
-foreach (List<string> rowFields in CsvEngine.ReadStreaming(readStream, delimiter, encoding))
-{
-    Console.WriteLine($"Field 0: {rowFields[0]}, Field 1: {rowFields[1]}");
-}
-```
-
----
-
-### 22. Auto Detect File Format
-
-Automatically detect format from file extension or content magic signatures.
-
-```csharp
-using var stream = File.OpenRead("unknown_file");
-ExcelFileFormat format = ExcelWorkbook.DetectFormat(stream, "unknown_file.xlsx");
-Console.WriteLine($"Detected format: {format}"); // XLSX, XLS, CSV, JSON, XML2003, etc.
-```
-
----
-
-### 23. Bulk Operations
-
-Matrix value manipulation, row/column insertion, deletion, and cell shifting.
-
-```csharp
-// 1. Bulk matrix assignment
-var matrix = new object?[,]
-{
-    { "ID", "Name", "Score" },
-    { 1, "Alice", 95.5 },
-    { 2, "Bob", 88.0 }
-};
-sheet.SetValues(matrix, startRow: 1, startColumn: 1);
-
-// 2. Retrieve matrix from region
-object?[,] dataMatrix = sheet.GetValues(startRow: 1, startColumn: 1, endRow: 3, endColumn: 3);
-
-// 3. Row & Column Shifting
-sheet.InsertRows(startRow: 2, count: 1);   // Inserts 1 blank row at row 2
-sheet.DeleteRows(startRow: 2, count: 1);   // Deletes 1 row at row 2
-
-sheet.InsertColumns(startColumn: 2, count: 1); // Inserts 1 blank column at column B
-sheet.DeleteColumns(startColumn: 2, count: 1); // Deletes 1 column at column B
-```
-
----
-
-### 25. Developer Helper & Convenience APIs
-
-Write cleaner, highly expressive code without writing repetitive LINQ expressions or conversion boilerplate.
-
-```csharp
-// 1. One-liner CSV & JSON Exports
-string sheetCsv = sheet.ToCsv(delimiter: ',');
-string sheetJson = sheet.ToJson(hasHeader: true);
-
+// 3. Row-Level & Cell Helpers
 foreach (var row in sheet.RowsUsed())
 {
-    Console.WriteLine(row.ToCsv()); // Format row as CSV line
+    string rowCsv                 = row.ToCsv();
+    object?[] rowValues           = row.Values();
+    Dictionary<string, object?> d = row.ToDictionary(headerRow: 1);
+    Product p                     = row.ToObject<Product>(headerRow: 1);
+    bool blank                    = row.IsBlank();
+    ExcelCell? firstCell          = row.FirstCellUsed();
+    ExcelCell? lastCell           = row.LastCellUsed();
 }
-
-// 2. Direct Value Conversions & Dictionaries
-object?[] values = row.Values();
-Dictionary<string, object?> dict = row.ToDictionary(headerRow: 1);
-List<Dictionary<string, object?>> dictList = sheet.ToDictionaryList();
-
-// 3. One-liner Object Mapping
-Person person = row.ToObject<Person>(headerRow: 1);
-List<Person> people = sheet.ToObjects<Person>().ToList();
-List<Person> rangePeople = sheet.Range("A1:D100").ToObjects<Person>().ToList();
-
-// 4. Cell Helpers & Default Value Fallbacks
-int age = cell.GetValueOrDefault<int>(defaultValue: 18);
-string text = cell.AsString();
-int count = cell.AsInt32();
-
-// 5. Row Blank & Boundary Checking
-bool isBlank = row.IsBlank();
-ExcelCell? firstCell = row.FirstCellUsed();
-ExcelCell? lastCell = row.LastCellUsed();
 ```
-
----
-
-### 26. Performance Best Practices
-
-To achieve optimal throughput and minimal GC pressure when working with large Excel files:
-
-1. **Use `CellsUsed()`, `RowsUsed()`, `ColumnsUsed()`**: Avoid looping empty cells in large worksheets; `CellsUsed()` yields only populated coordinates.
-2. **Prefer Lazy Enumeration**: Methods like `sheet.Rows` and `sheet.Columns` utilize `yield return` and do not allocate intermediate `List<T>` arrays.
-3. **Use `ExcelStreamingWriter` & `ExcelStreamingReader`**: For datasets exceeding 100,000 rows, streaming reduces memory from hundreds of megabytes to a flat ~10 MB buffer.
-4. **Cached Range Bounds**: `sheet.UsedRange`, `sheet.MaxRow`, and `sheet.MaxColumn` use internal O(1) bounds tracking, avoiding full dictionary scans on repeat calls.
 
 ---
 

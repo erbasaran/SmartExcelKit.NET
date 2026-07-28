@@ -1,6 +1,6 @@
-using SmartExcelKit.Core;
 using System.IO.Compression;
 using System.Text;
+using SmartExcelKit.Core;
 
 namespace SmartExcelKit.Streaming;
 
@@ -76,9 +76,7 @@ public sealed class ExcelStreamingWriter : IDisposable
 
                 if (val is string s)
                 {
-                    // Escape XML characters
                     string escaped = System.Security.SecurityElement.Escape(s);
-                    // Use inlineStr to avoid building a Shared String Table in memory
                     _currentWriter.Write($"<c r=\"{cellRef}\" t=\"inlineStr\"><is><t>{escaped}</t></is></c>");
                 }
                 else if (val is bool b)
@@ -123,6 +121,29 @@ public sealed class ExcelStreamingWriter : IDisposable
     }
 
     /// <summary>
+    /// Writes a row asynchronously to the active worksheet.
+    /// </summary>
+    public async Task WriteRowAsync(IEnumerable<object?> values, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(() => WriteRow(values), cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes multiple rows asynchronously to the active worksheet.
+    /// </summary>
+    public async Task WriteRowsAsync(IEnumerable<IEnumerable<object?>> rows, CancellationToken cancellationToken = default)
+    {
+        await Task.Run(() =>
+        {
+            foreach (var r in rows)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                WriteRow(r);
+            }
+        }, cancellationToken);
+    }
+
+    /// <summary>
     /// Closes the currently active worksheet.
     /// </summary>
     public void EndSheet()
@@ -152,7 +173,6 @@ public sealed class ExcelStreamingWriter : IDisposable
 
     private void WriteMetadataFiles()
     {
-        // 1. Write xl/styles.xml (Minimal layout to satisfy Excel parser)
         var stylesEntry = _archive.CreateEntry("xl/styles.xml");
         using (var stream = stylesEntry.Open())
         using (var writer = new StreamWriter(stream, Encoding.UTF8))
@@ -167,7 +187,6 @@ public sealed class ExcelStreamingWriter : IDisposable
             writer.Write("</styleSheet>");
         }
 
-        // 2. Write xl/_rels/workbook.xml.rels
         var wbRelsEntry = _archive.CreateEntry("xl/_rels/workbook.xml.rels");
         using (var stream = wbRelsEntry.Open())
         using (var writer = new StreamWriter(stream, Encoding.UTF8))
@@ -182,7 +201,6 @@ public sealed class ExcelStreamingWriter : IDisposable
             writer.Write("</Relationships>");
         }
 
-        // 3. Write xl/workbook.xml
         var wbEntry = _archive.CreateEntry("xl/workbook.xml");
         using (var stream = wbEntry.Open())
         using (var writer = new StreamWriter(stream, Encoding.UTF8))
@@ -198,7 +216,6 @@ public sealed class ExcelStreamingWriter : IDisposable
             writer.Write("</workbook>");
         }
 
-        // 4. Write _rels/.rels
         var rootRelsEntry = _archive.CreateEntry("_rels/.rels");
         using (var stream = rootRelsEntry.Open())
         using (var writer = new StreamWriter(stream, Encoding.UTF8))
@@ -209,7 +226,6 @@ public sealed class ExcelStreamingWriter : IDisposable
             writer.Write("</Relationships>");
         }
 
-        // 5. Write [Content_Types].xml
         var ctEntry = _archive.CreateEntry("[Content_Types].xml");
         using (var stream = ctEntry.Open())
         using (var writer = new StreamWriter(stream, Encoding.UTF8))

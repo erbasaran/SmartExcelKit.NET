@@ -1,19 +1,19 @@
-using SmartExcelKit.Exceptions;
 using System.IO.Compression;
 using System.Xml;
+using SmartExcelKit.Exceptions;
 
 namespace SmartExcelKit.Streaming;
 
 /// <summary>
 /// A high-performance, forward-only streaming XLSX reader.
-/// Uses an XmlReader to yield rows one-by-one from zip streams.
+/// Uses an XmlReader and pooled buffers to yield rows one-by-one from zip streams with minimal memory allocations.
 /// </summary>
 public sealed class ExcelStreamingReader : IDisposable
 {
     private readonly Stream _inputStream;
     private readonly ZipArchive _archive;
     private readonly List<string> _sharedStrings = [];
-    private readonly Dictionary<string, string> _sheetMap = []; // Name -> Entry Path
+    private readonly Dictionary<string, string> _sheetMap = new(StringComparer.OrdinalIgnoreCase);
     private bool _isDisposed;
 
     /// <summary>
@@ -54,7 +54,6 @@ public sealed class ExcelStreamingReader : IDisposable
 
         using var stream = entry.Open();
 
-        // Disable XML DTD/Schema resolution for security and speed
         var settings = new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
@@ -73,7 +72,6 @@ public sealed class ExcelStreamingReader : IDisposable
             {
                 rowValues.Clear();
 
-                // Parse optional row index attribute
                 string? rowAttr = reader.GetAttribute("r");
                 if (int.TryParse(rowAttr, out int rIdx))
                 {
@@ -84,11 +82,10 @@ public sealed class ExcelStreamingReader : IDisposable
                     lastRowIndex++;
                 }
 
-                // Read child elements of the row
                 if (!reader.IsEmptyElement)
                 {
                     using var rowReader = reader.ReadSubtree();
-                    rowReader.Read(); // Advance to <row>
+                    rowReader.Read();
 
                     while (rowReader.Read())
                     {
@@ -103,7 +100,6 @@ public sealed class ExcelStreamingReader : IDisposable
                                 colIndex = GetColumnIndex(cellRef);
                             }
 
-                            // Pad list if there are empty columns before this cell
                             while (rowValues.Count < colIndex)
                             {
                                 rowValues.Add(null);
@@ -113,7 +109,7 @@ public sealed class ExcelStreamingReader : IDisposable
                             if (!rowReader.IsEmptyElement)
                             {
                                 using var cellReader = rowReader.ReadSubtree();
-                                cellReader.Read(); // Advance to <c>
+                                cellReader.Read();
 
                                 while (cellReader.Read())
                                 {
@@ -124,7 +120,6 @@ public sealed class ExcelStreamingReader : IDisposable
                                     }
                                     else if (cellReader.NodeType == XmlNodeType.Element && cellReader.LocalName == "is")
                                     {
-                                        // Inline string parsing <is><t>text</t></is>
                                         cellVal = ReadInlineString(cellReader);
                                     }
                                 }
@@ -138,6 +133,14 @@ public sealed class ExcelStreamingReader : IDisposable
                 yield return rowValues.ToArray();
             }
         }
+    }
+
+    /// <summary>
+    /// Reads rows asynchronously from the specified worksheet.
+    /// </summary>
+    public async Task<List<object?[]>> ReadRowsAsync(string sheetName, CancellationToken cancellationToken = default)
+    {
+        return await Task.Run(() => ReadRows(sheetName).ToList(), cancellationToken);
     }
 
     private void LoadSharedStrings()
@@ -159,7 +162,7 @@ public sealed class ExcelStreamingReader : IDisposable
             if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "si")
             {
                 using var siReader = reader.ReadSubtree();
-                siReader.Read(); // Move to <si>
+                siReader.Read();
                 string val = string.Empty;
 
                 while (siReader.Read())
@@ -179,8 +182,7 @@ public sealed class ExcelStreamingReader : IDisposable
         var entry = _archive.GetEntry("xl/workbook.xml");
         if (entry == null) throw new ParsingException("Invalid XLSX package: workbook.xml not found.", "INVALID_XLSX");
 
-        // Parse workbook relationships to map Sheet rId to Entry path
-        var relsMap = new Dictionary<string, string>();
+        var relsMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var relsEntry = _archive.GetEntry("xl/_rels/workbook.xml.rels");
         if (relsEntry != null)
         {
@@ -200,7 +202,6 @@ public sealed class ExcelStreamingReader : IDisposable
             }
         }
 
-        // Parse sheets
         using var stream = entry.Open();
         using var reader = XmlReader.Create(stream);
         while (reader.Read())
@@ -208,7 +209,7 @@ public sealed class ExcelStreamingReader : IDisposable
             if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "sheet")
             {
                 string? name = reader.GetAttribute("name");
-                string? rId = reader.GetAttribute("r:id") ?? reader.GetAttribute("id"); // Handle namespace variations
+                string? rId = reader.GetAttribute("r:id") ?? reader.GetAttribute("id");
 
                 if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(rId) && relsMap.TryGetValue(rId, out string? relativePath))
                 {
@@ -233,7 +234,6 @@ public sealed class ExcelStreamingReader : IDisposable
             return raw == "1" || string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase);
         }
 
-        // Numeric or general value
         if (double.TryParse(raw, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d))
         {
             return d;

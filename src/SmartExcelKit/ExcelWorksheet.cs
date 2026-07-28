@@ -1,8 +1,4 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Data;
-using System.Linq;
 using System.Reflection;
 using SmartExcelKit.Core;
 using SmartExcelKit.Styles;
@@ -22,6 +18,8 @@ public sealed class ExcelWorksheet
     private readonly HashSet<int> _hiddenRows = [];
     private readonly HashSet<int> _hiddenColumns = [];
     private readonly List<ExcelRangeAddress> _mergedRanges = [];
+    private readonly Dictionary<int, int> _rowOutlineLevels = [];
+    private readonly Dictionary<int, int> _columnOutlineLevels = [];
 
     // Cell counts per row and column for O(1) empty checks
     private readonly Dictionary<int, int> _rowCellCounts = [];
@@ -81,9 +79,64 @@ public sealed class ExcelWorksheet
     public int FreezeColumns { get; set; }
 
     /// <summary>
+    /// Gets or sets horizontal split position.
+    /// </summary>
+    public int SplitHorizontal { get; set; }
+
+    /// <summary>
+    /// Gets or sets vertical split position.
+    /// </summary>
+    public int SplitVertical { get; set; }
+
+    /// <summary>
     /// Gets the list of merged cell ranges.
     /// </summary>
     public IReadOnlyList<ExcelRangeAddress> MergedRanges => _mergedRanges;
+
+    /// <summary>
+    /// Gets the collection of Excel Tables in this worksheet.
+    /// </summary>
+    public Tables.ExcelTableCollection Tables { get; }
+
+    /// <summary>
+    /// Gets the collection of conditional formatting rules.
+    /// </summary>
+    public Formatting.ExcelConditionalFormattingCollection ConditionalFormatting { get; }
+
+    /// <summary>
+    /// Gets the collection of data validation rules.
+    /// </summary>
+    public Validation.ExcelDataValidationCollection DataValidations { get; }
+
+    /// <summary>
+    /// Gets the collection of worksheet-scoped named ranges.
+    /// </summary>
+    public Core.ExcelNamedRangeCollection NamedRanges { get; }
+
+    /// <summary>
+    /// Gets page print setup settings.
+    /// </summary>
+    public PageSetup.ExcelPageSetup PageSetup { get; }
+
+    /// <summary>
+    /// Gets embedded images in the worksheet.
+    /// </summary>
+    public List<Drawings.ExcelImage> Images { get; } = [];
+
+    /// <summary>
+    /// Gets embedded charts in the worksheet.
+    /// </summary>
+    public List<Drawings.ExcelChart> Charts { get; } = [];
+
+    /// <summary>
+    /// Gets embedded pivot tables in the worksheet.
+    /// </summary>
+    public List<Drawings.ExcelPivotTable> PivotTables { get; } = [];
+
+    /// <summary>
+    /// Gets or sets the AutoFilter range address.
+    /// </summary>
+    public ExcelRangeAddress? AutoFilterRange { get; set; }
 
     /// <summary>
     /// Gets the sheet protection password hash (HEX format). Returns null if sheet is not protected.
@@ -100,6 +153,9 @@ public sealed class ExcelWorksheet
     /// </summary>
     internal IReadOnlyDictionary<CellAddress, CellData> RawCells => _cells;
 
+    internal IReadOnlyDictionary<int, double> CustomColumnWidths => _columnWidths;
+    internal IReadOnlyDictionary<int, double> CustomRowHeights => _rowHeights;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ExcelWorksheet"/> class.
     /// </summary>
@@ -107,6 +163,12 @@ public sealed class ExcelWorksheet
     {
         _workbook = workbook ?? throw new ArgumentNullException(nameof(workbook));
         _name = name;
+
+        Tables = new Tables.ExcelTableCollection(this);
+        ConditionalFormatting = new Formatting.ExcelConditionalFormattingCollection(this);
+        DataValidations = new Validation.ExcelDataValidationCollection(this);
+        NamedRanges = new Core.ExcelNamedRangeCollection(name);
+        PageSetup = new PageSetup.ExcelPageSetup(this);
     }
 
     #region Security & Protection
@@ -560,6 +622,7 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Comment = null;
+                data.CommentObject = null;
                 if (data.IsEmpty)
                 {
                     _cells.Remove(address);
@@ -568,7 +631,35 @@ public sealed class ExcelWorksheet
             }
             return;
         }
-        GetOrCreateCellData(address).Comment = comment;
+        var cellData = GetOrCreateCellData(address);
+        cellData.Comment = comment;
+        cellData.CommentObject = new Core.ExcelComment(comment!);
+    }
+
+    internal Core.ExcelComment? GetCellCommentObject(CellAddress address)
+    {
+        return _cells.TryGetValue(address, out var data) ? data.CommentObject : null;
+    }
+
+    internal void SetCellCommentObject(CellAddress address, Core.ExcelComment? comment)
+    {
+        if (comment == null)
+        {
+            if (_cells.TryGetValue(address, out var data))
+            {
+                data.CommentObject = null;
+                data.Comment = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
+            }
+            return;
+        }
+        var cellData = GetOrCreateCellData(address);
+        cellData.CommentObject = comment;
+        cellData.Comment = comment.Text;
     }
 
     internal string? GetCellHyperlink(CellAddress address)
@@ -583,6 +674,7 @@ public sealed class ExcelWorksheet
             if (_cells.TryGetValue(address, out var data))
             {
                 data.Hyperlink = null;
+                data.HyperlinkObject = null;
                 if (data.IsEmpty)
                 {
                     _cells.Remove(address);
@@ -591,7 +683,223 @@ public sealed class ExcelWorksheet
             }
             return;
         }
-        GetOrCreateCellData(address).Hyperlink = hyperlink;
+        var cellData = GetOrCreateCellData(address);
+        cellData.Hyperlink = hyperlink;
+        cellData.HyperlinkObject = new Core.ExcelHyperlink(hyperlink!);
+    }
+
+    internal Core.ExcelHyperlink? GetCellHyperlinkObject(CellAddress address)
+    {
+        return _cells.TryGetValue(address, out var data) ? data.HyperlinkObject : null;
+    }
+
+    internal void SetCellHyperlinkObject(CellAddress address, Core.ExcelHyperlink? hyperlink)
+    {
+        if (hyperlink == null)
+        {
+            if (_cells.TryGetValue(address, out var data))
+            {
+                data.HyperlinkObject = null;
+                data.Hyperlink = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
+            }
+            return;
+        }
+        var cellData = GetOrCreateCellData(address);
+        cellData.HyperlinkObject = hyperlink;
+        cellData.Hyperlink = hyperlink.Target;
+    }
+
+    internal Core.RichText? GetCellRichText(CellAddress address)
+    {
+        return _cells.TryGetValue(address, out var data) ? data.RichText : null;
+    }
+
+    internal void SetCellRichText(CellAddress address, Core.RichText? richText)
+    {
+        if (richText == null || richText.Count == 0)
+        {
+            if (_cells.TryGetValue(address, out var data))
+            {
+                data.RichText = null;
+                if (data.IsEmpty)
+                {
+                    _cells.Remove(address);
+                    TrackCellRemoved(address);
+                }
+            }
+            return;
+        }
+        var cellData = GetOrCreateCellData(address);
+        cellData.RichText = richText;
+        cellData.Value = richText.ToString();
+    }
+
+    #endregion
+
+    #region Layout, Panes, Grouping & Filtering
+
+    /// <summary>
+    /// Splits the worksheet view at the specified pixel offset.
+    /// </summary>
+    public void SplitPanes(int horizontalPixels, int verticalPixels)
+    {
+        SplitHorizontal = Math.Max(0, horizontalPixels);
+        SplitVertical = Math.Max(0, verticalPixels);
+    }
+
+    /// <summary>
+    /// Groups a contiguous range of rows into an outline level.
+    /// </summary>
+    public void GroupRows(int startRow, int endRow)
+    {
+        if (startRow < 1 || endRow < startRow) throw new ArgumentOutOfRangeException(nameof(startRow));
+        for (int r = startRow; r <= endRow; r++)
+        {
+            _rowOutlineLevels[r] = _rowOutlineLevels.TryGetValue(r, out int lvl) ? lvl + 1 : 1;
+        }
+    }
+
+    /// <summary>
+    /// Ungroups a range of rows in the outline hierarchy.
+    /// </summary>
+    public void UngroupRows(int startRow, int endRow)
+    {
+        if (startRow < 1 || endRow < startRow) throw new ArgumentOutOfRangeException(nameof(startRow));
+        for (int r = startRow; r <= endRow; r++)
+        {
+            if (_rowOutlineLevels.TryGetValue(r, out int lvl) && lvl > 1)
+                _rowOutlineLevels[r] = lvl - 1;
+            else
+                _rowOutlineLevels.Remove(r);
+        }
+    }
+
+    /// <summary>
+    /// Groups a contiguous range of columns into an outline level.
+    /// </summary>
+    public void GroupColumns(int startColumn, int endColumn)
+    {
+        if (startColumn < 1 || endColumn < startColumn) throw new ArgumentOutOfRangeException(nameof(startColumn));
+        for (int c = startColumn; c <= endColumn; c++)
+        {
+            _columnOutlineLevels[c] = _columnOutlineLevels.TryGetValue(c, out int lvl) ? lvl + 1 : 1;
+        }
+    }
+
+    /// <summary>
+    /// Ungroups a range of columns in the outline hierarchy.
+    /// </summary>
+    public void UngroupColumns(int startColumn, int endColumn)
+    {
+        if (startColumn < 1 || endColumn < startColumn) throw new ArgumentOutOfRangeException(nameof(startColumn));
+        for (int c = startColumn; c <= endColumn; c++)
+        {
+            if (_columnOutlineLevels.TryGetValue(c, out int lvl) && lvl > 1)
+                _columnOutlineLevels[c] = lvl - 1;
+            else
+                _columnOutlineLevels.Remove(c);
+        }
+    }
+
+    /// <summary>
+    /// Gets the outline grouping level of a row.
+    /// </summary>
+    public int GetRowOutlineLevel(int row) => _rowOutlineLevels.TryGetValue(row, out int lvl) ? lvl : 0;
+
+    /// <summary>
+    /// Gets the outline grouping level of a column.
+    /// </summary>
+    public int GetColumnOutlineLevel(int column) => _columnOutlineLevels.TryGetValue(column, out int lvl) ? lvl : 0;
+
+    /// <summary>
+    /// Enables AutoFilter on the specified range string or used range.
+    /// </summary>
+    public void AutoFilter(string? rangeAddress = null)
+    {
+        if (string.IsNullOrEmpty(rangeAddress))
+        {
+            AutoFilterRange = UsedRange.Address;
+        }
+        else
+        {
+            AutoFilterRange = ExcelRangeAddress.Parse(rangeAddress!);
+        }
+    }
+
+    /// <summary>
+    /// Clears AutoFilter settings from the worksheet.
+    /// </summary>
+    public void ClearAutoFilter()
+    {
+        AutoFilterRange = null;
+    }
+
+    /// <summary>
+    /// Sorts rows within a range by a target column index using stable, culture-aware sorting.
+    /// </summary>
+    public void Sort(int startRow, int startColumn, int endRow, int endColumn, int sortColumn, bool ascending = true, System.Globalization.CultureInfo? culture = null, IComparer<object?>? customComparer = null)
+    {
+        if (startRow >= endRow) return;
+
+        culture ??= System.Globalization.CultureInfo.CurrentCulture;
+
+        var rowsData = new List<Tuple<int, List<object?>>>();
+        int numCols = endColumn - startColumn + 1;
+
+        for (int r = startRow; r <= endRow; r++)
+        {
+            var cellValues = new List<object?>(numCols);
+            for (int c = startColumn; c <= endColumn; c++)
+            {
+                cellValues.Add(GetCellValue(new CellAddress(r, c)));
+            }
+            rowsData.Add(Tuple.Create(r, cellValues));
+        }
+
+        int targetColOffset = sortColumn - startColumn;
+
+        rowsData.Sort((r1, r2) =>
+        {
+            var val1 = targetColOffset >= 0 && targetColOffset < r1.Item2.Count ? r1.Item2[targetColOffset] : null;
+            var val2 = targetColOffset >= 0 && targetColOffset < r2.Item2.Count ? r2.Item2[targetColOffset] : null;
+
+            int cmp;
+            if (customComparer != null)
+            {
+                cmp = customComparer.Compare(val1, val2);
+            }
+            else
+            {
+                if (val1 == null && val2 == null) cmp = 0;
+                else if (val1 == null) cmp = -1;
+                else if (val2 == null) cmp = 1;
+                else if (val1 is IComparable comp1 && val1.GetType() == val2.GetType())
+                {
+                    cmp = comp1.CompareTo(val2);
+                }
+                else
+                {
+                    cmp = string.Compare(val1.ToString(), val2.ToString(), true, culture);
+                }
+            }
+
+            return ascending ? cmp : -cmp;
+        });
+
+        for (int i = 0; i < rowsData.Count; i++)
+        {
+            int targetRow = startRow + i;
+            var vals = rowsData[i].Item2;
+            for (int c = 0; c < vals.Count; c++)
+            {
+                SetCellValue(new CellAddress(targetRow, startColumn + c), vals[c]);
+            }
+        }
     }
 
     #endregion
@@ -691,6 +999,18 @@ public sealed class ExcelWorksheet
         if (!_mergedRanges.Contains(range))
         {
             _mergedRanges.Add(range);
+        }
+    }
+
+    /// <summary>
+    /// Merges the specified range of cells string.
+    /// </summary>
+    /// <param name="rangeAddress">The range address string (e.g., "A1:D1").</param>
+    public void MergeCells(string rangeAddress)
+    {
+        if (!string.IsNullOrWhiteSpace(rangeAddress))
+        {
+            MergeCells(ExcelRangeAddress.Parse(rangeAddress));
         }
     }
 

@@ -1,8 +1,9 @@
+using System.Data;
+using System.Text;
 using SmartExcelKit.Core;
 using SmartExcelKit.Exceptions;
 using SmartExcelKit.Providers;
 using SmartExcelKit.Styles;
-using System.Text;
 
 namespace SmartExcelKit;
 
@@ -89,9 +90,75 @@ public sealed class ExcelWorkbook : IDisposable
     public DocumentProperties Properties => _properties;
 
     /// <summary>
+    /// Gets the collection of workbook-scoped named ranges.
+    /// </summary>
+    public Core.ExcelNamedRangeCollection NamedRanges { get; } = new Core.ExcelNamedRangeCollection();
+
+    /// <summary>
     /// Gets or sets raw VBA binary project bytes (vbaProject.bin) to preserve macros in macro-enabled templates/files (.xlsm).
     /// </summary>
     public byte[]? VbaProjectBytes { get; set; }
+
+    /// <summary>
+    /// Gets the workbook protection password hash (HEX format). Returns null if workbook is not protected.
+    /// </summary>
+    public string? ProtectionPasswordHash { get; internal set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the workbook structure is protected.
+    /// </summary>
+    public bool IsProtected => ProtectionPasswordHash != null;
+
+    /// <summary>
+    /// Protects the workbook structure with a password using the Excel XOR hashing algorithm.
+    /// </summary>
+    public void Protect(string password)
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            ProtectionPasswordHash = "0000";
+            return;
+        }
+
+        int hash = 0;
+        for (int i = password.Length - 1; i >= 0; i--)
+        {
+            char c = password[i];
+            hash = ((hash >> 14) & 0x01) | ((hash << 1) & 0x7FFF);
+            hash ^= c;
+        }
+        hash = ((hash >> 14) & 0x01) | ((hash << 1) & 0x7FFF);
+        hash ^= password.Length;
+        hash ^= 0xCE4B;
+
+        ProtectionPasswordHash = hash.ToString("X4");
+    }
+
+    /// <summary>
+    /// Unprotects the workbook.
+    /// </summary>
+    public void Unprotect()
+    {
+        ProtectionPasswordHash = null;
+    }
+
+    /// <summary>
+    /// Recalculates all cell formulas across all worksheets in the workbook.
+    /// </summary>
+    public void Recalculate()
+    {
+        Formula.FormulaEvaluator.ClearCache();
+        foreach (var ws in _worksheets)
+        {
+            foreach (var cell in ws.CellsUsed())
+            {
+                if (!string.IsNullOrEmpty(cell.Formula))
+                {
+                    cell.Value = Formula.FormulaEvaluator.Evaluate(cell.Formula!, ws, cell.Address);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes a new, empty <see cref="ExcelWorkbook"/>.
@@ -377,6 +444,120 @@ public sealed class ExcelWorkbook : IDisposable
             ".HTML" or ".HTM" => ExcelFileFormat.HtmlTable,
             _ => ExcelFileFormat.Unknown
         };
+    }
+
+    #endregion
+
+    #region Workbook Conversion & Export Helpers
+
+    /// <summary>
+    /// Formats all worksheets in the workbook into a single CSV formatted string.
+    /// </summary>
+    /// <param name="delimiter">The column delimiter character (default ',').</param>
+    /// <param name="quoteCharacter">The quote character for escaping (default '"').</param>
+    /// <returns>The combined CSV text across all worksheets.</returns>
+    public string ToCsv(char delimiter = ',', char quoteCharacter = '"')
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < _worksheets.Count; i++)
+        {
+            var sheetCsv = _worksheets[i].ToCsv(delimiter, quoteCharacter);
+            if (!string.IsNullOrWhiteSpace(sheetCsv))
+            {
+                if (sb.Length > 0)
+                {
+                    sb.AppendLine();
+                }
+                sb.Append(sheetCsv);
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Serializes all worksheets in the workbook into a single JSON string.
+    /// </summary>
+    /// <param name="hasHeader">Whether top row contains property names (default true).</param>
+    /// <returns>A JSON string representing all worksheets.</returns>
+    public string ToJson(bool hasHeader = true)
+    {
+        var dict = new Dictionary<string, object>();
+        foreach (var ws in _worksheets)
+        {
+            dict[ws.Name] = ws.ToDictionaryList(1, 1, hasHeader);
+        }
+        return System.Text.Json.JsonSerializer.Serialize(dict, new System.Text.Json.JsonSerializerOptions { WriteIndented = false });
+    }
+
+    /// <summary>
+    /// Exports all worksheets in the workbook to a <see cref="DataSet"/>, where each table represents a worksheet.
+    /// </summary>
+    /// <param name="hasHeader">Whether top row contains column headers (default true).</param>
+    /// <returns>A <see cref="DataSet"/> containing data tables for each worksheet.</returns>
+    public DataSet ToDataSet(bool hasHeader = true)
+    {
+        var ds = new DataSet(Properties.Title ?? "WorkbookDataSet");
+        foreach (var ws in _worksheets)
+        {
+            var dt = ws.ToDataTable(hasHeader);
+            dt.TableName = ws.Name;
+            ds.Tables.Add(dt);
+        }
+        return ds;
+    }
+
+    /// <summary>
+    /// Exports active or combined worksheets to a single <see cref="DataTable"/>.
+    /// </summary>
+    /// <param name="hasHeader">Whether top row contains column headers (default true).</param>
+    /// <returns>A <see cref="DataTable"/> representing worksheet data.</returns>
+    public DataTable ToDataTable(bool hasHeader = true)
+    {
+        return ActiveWorksheet.ToDataTable(hasHeader);
+    }
+
+    /// <summary>
+    /// Flattens and exports rows from ALL worksheets in the workbook to POCO objects of type <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">The target POCO class type.</typeparam>
+    /// <param name="startRow">The 1-based start row (default 1).</param>
+    /// <param name="startColumn">The 1-based start column (default 1).</param>
+    /// <returns>An enumerable sequence of POCO objects mapped across all worksheets.</returns>
+    public IEnumerable<T> ToObjects<T>(int startRow = 1, int startColumn = 1) where T : class, new()
+    {
+        foreach (var ws in _worksheets)
+        {
+            foreach (var item in ws.ToObjects<T>(startRow, startColumn))
+            {
+                yield return item;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts all worksheets in the workbook to a list of row dictionaries.
+    /// Includes a '__Worksheet' key indicating the originating sheet name.
+    /// </summary>
+    /// <param name="startRow">1-based start row index (default 1).</param>
+    /// <param name="startColumn">1-based start column index (default 1).</param>
+    /// <param name="hasHeader">Whether top row contains column headers (default true).</param>
+    /// <returns>A list of dictionary rows representing data across all worksheets.</returns>
+    public List<Dictionary<string, object?>> ToDictionaryList(int startRow = 1, int startColumn = 1, bool hasHeader = true)
+    {
+        var result = new List<Dictionary<string, object?>>();
+        foreach (var ws in _worksheets)
+        {
+            var sheetRows = ws.ToDictionaryList(startRow, startColumn, hasHeader);
+            foreach (var row in sheetRows)
+            {
+                if (!row.ContainsKey("__Worksheet"))
+                {
+                    row["__Worksheet"] = ws.Name;
+                }
+                result.Add(row);
+            }
+        }
+        return result;
     }
 
     #endregion
